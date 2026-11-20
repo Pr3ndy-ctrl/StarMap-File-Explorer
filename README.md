@@ -4,6 +4,8 @@ See every file on your computer as a star. StarMap draws your home folder as a 3
 
 ![The StarMap star map of a sample home folder](docs/screenshot-map.jpg)
 
+Full guides, troubleshooting and the FAQ are in the [wiki](https://github.com/Pr3ndy-ctrl/StarMap-File-Explorer/wiki).
+
 ## What it does
 
 - **A map of your files.** Each file is a star, sized by how big it is and coloured by type (writing, code, images, audio, video, data, archives). Each folder is a cluster with its subfolders nested inside. App bundles and dependency folders such as `node_modules` are drawn as violet nebulae so they don't drown out your own files.
@@ -104,6 +106,7 @@ The tests build a small sample home folder, scan it, start the server and exerci
 | `StarMap.command`, `StarMap.bat`, `StarMap.sh` | Double-click starters for macOS, Windows and Linux. |
 | `tools/demo_home.py` | Builds a sample home folder. |
 | `tests/` | The test suite. |
+| `docs/wiki/` | The wiki pages. A workflow publishes them to the GitHub wiki when they change. |
 
 ## Licence
 

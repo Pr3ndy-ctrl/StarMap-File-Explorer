@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StarMap File Explorer</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+@font-face{font-family:"Cormorant Garamond";font-style:normal;font-weight:500;font-display:swap;src:url(/fonts/cormorant-garamond-latin-500-normal.woff2) format("woff2")}
+@font-face{font-family:"Cormorant Garamond";font-style:normal;font-weight:600;font-display:swap;src:url(/fonts/cormorant-garamond-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"Cormorant Garamond";font-style:italic;font-weight:500;font-display:swap;src:url(/fonts/cormorant-garamond-latin-500-italic.woff2) format("woff2")}
+@font-face{font-family:"Cormorant Garamond";font-style:italic;font-weight:600;font-display:swap;src:url(/fonts/cormorant-garamond-latin-600-italic.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/ibm-plex-mono-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-weight:500;font-display:swap;src:url(/fonts/ibm-plex-mono-latin-500-normal.woff2) format("woff2")}
+/* Layout idea: a full-bleed celestial atlas. The sky is the page; a narrow chart key sits on the left, the selected star's record on the right. Single dark theme by choice. */
+:root{
+  color-scheme: dark;
+  --sky:#060a13;
+  --sky-2:#0d1524;
+  --ink:#e9e4d6;
+  --ink-dim:#8f96a6;
+  --rule:rgba(233,228,214,.16);
+  --gold:#f2c66d;
+  --s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s0:#7d8494;
+  --crit:#ff7a66;
+  --ok:#8fe3b0;
+  --panel:rgba(9,14,25,.82);
+  --display:"Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:radial-gradient(ellipse at 55% 50%, #121c33 0%, var(--sky-2) 35%, var(--sky) 75%);color:var(--ink);font-family:var(--mono);font-size:12px;line-height:1.5;overflow:hidden}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+canvas.drag{cursor:grabbing}
+#labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.lab{position:absolute;left:0;top:0;display:none;font-family:var(--display);font-style:italic;font-size:17px;letter-spacing:.02em;color:var(--ink);white-space:nowrap;pointer-events:auto;cursor:pointer;background:none;border:0;padding:2px 4px;text-shadow:0 0 10px var(--sky),0 0 4px var(--sky),0 0 2px var(--sky)}
+.lab.t1{font-size:21px;font-weight:600}
+.lab.t3{font-size:14px;color:var(--ink-dim)}
+.lab::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:10px;background:var(--rule)}
+#ring{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;border:1px solid var(--gold);border-radius:50%;pointer-events:none;display:none;animation:pulse 1.8s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(242,198,109,.5)}100%{box-shadow:0 0 0 14px rgba(242,198,109,0)}}
+@media (prefers-reduced-motion:reduce){#ring{animation:none}}
+.figs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.figs div{border-top:1px solid var(--rule);padding-top:6px}
+.figs b{display:block;font-family:var(--display);font-weight:600;font-size:22px;line-height:1.1;color:var(--gold);font-variant-numeric:tabular-nums}
+.figs span{font-size:10px;color:var(--ink-dim)}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:8px}
+#sys,#net{position:absolute;top:74px;width:340px;display:flex;flex-direction:column;gap:12px;pointer-events:none;z-index:1;text-shadow:0 0 8px var(--sky),0 0 3px var(--sky),0 0 1px var(--sky)}
+#sys{left:326px}
+#net{right:16px;width:320px}
+.blk{display:grid;grid-template-columns:20px minmax(0,1fr);gap:5px 8px}
+.blk>.ico{grid-row:1/span 3;width:20px;height:20px;color:var(--ink);margin-top:2px;filter:drop-shadow(0 0 3px var(--sky))}
+.blk>.top,.blk>.bars,.blk>.keys{grid-column:2}
+.blk .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.blk .mini{pointer-events:auto;flex:none;width:18px;height:18px;line-height:14px;padding:0;background:none;border:1px solid var(--rule);color:var(--ink-dim);font:inherit;font-size:12px;cursor:pointer;text-align:center}
+.blk .mini:hover{color:var(--gold);border-color:var(--gold)}
+.blk .bars{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.blk.min{display:flex;flex-direction:row;align-items:center;gap:8px}
+.blk.min>.ico{order:0;margin-top:0;flex:none}.blk.min>.bars{order:1}.blk.min>.top{order:2}
+
+.blk .track{height:8px;border:1px dashed var(--ink-dim);border-radius:4px;pointer-events:auto;overflow:hidden}
+.blk .track i{display:block;height:100%;border-radius:4px;min-width:2px;transition:width .4s ease}
+#sys .line,#net .line{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+#sys .line b,#net .line b{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.1;color:var(--ink)}
+#sys .line span,#net .line span{color:var(--ink-dim);font-size:11px}
+#sys .thin,#net .thin{display:flex;gap:2px;height:8px;width:100%;pointer-events:auto}
+#sys .thin>div,#net .thin>div{height:100%;border-radius:4px;min-width:2px}
+#sys .thin>div.free,#net .thin>div.free{border:1px dashed var(--ink-dim)}
+#sys .keys,#net .keys{display:flex;flex-wrap:wrap;gap:2px 12px;font-size:11px;color:var(--ink)}
+#sys .keys span,#net .keys span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+#sys .keys i,#net .keys i{width:8px;height:8px;border-radius:2px;display:block;flex:none}
+#sys .keys i.free,#net .keys i.free{border:1px dashed var(--ink-dim)}
+#sys .keys em,#net .keys em{font-style:normal;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+#sys .gap{height:8px}
+#sys .blk.min .line,#sys .blk.min .keys,#net .blk.min .line,#net .blk.min .keys{display:none}
+#bSys{display:none}
+#home{background:none;border:1px solid var(--rule);color:var(--ink-dim);font:inherit;font-size:11px;padding:3px 8px;cursor:pointer;white-space:nowrap}
+#home:hover{color:var(--gold);border-color:var(--gold)}
+.lab:hover,.lab:focus-visible{color:var(--gold);outline:none}
+.lab small{font-family:var(--mono);font-style:normal;font-size:10px;color:var(--ink-dim);margin-left:6px}
+#recs{position:absolute;left:16px;right:16px;top:12px;height:44px;display:flex;align-items:stretch;gap:8px;background:var(--panel);border:1px solid var(--rule);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:6px 8px;overflow-x:auto;overflow-y:hidden;z-index:3;scrollbar-width:thin}
+#recs .lead b.warn{color:var(--gold)}#recs .lead b.fine{color:var(--ok)}
+#bScan{flex:none;align-self:center}
+#scan{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(6,10,19,.72);z-index:8;padding:16px}
+#scan.on{display:flex}
+#scan .box{width:min(520px,100%);background:#0a101d;border:1px solid var(--gold);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+#scan ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:5px}
+.prog{height:12px;border:1px solid var(--rule);background:rgba(0,0,0,.35)}
+.prog{overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:var(--gold);transition:width .15s linear}
+.prog.indet i{width:30%!important;animation:indet 1.4s ease-in-out infinite}
+@keyframes indet{0%{margin-left:-30%}100%{margin-left:100%}}
+@media (prefers-reduced-motion:reduce){.prog.indet i{animation:none;margin-left:35%}}
+.btn.warn{border-color:var(--crit);color:var(--crit)}
+.btn:disabled{opacity:.6;cursor:default}
+#sStat{overflow-wrap:anywhere;min-height:3em}
+#recs .lead{display:flex;flex-direction:column;justify-content:center;padding:0 10px 0 4px;white-space:nowrap;border-right:1px solid var(--rule);flex:none}
+#recs .lead b{font-weight:500;color:var(--crit)}
+#recs .lead span{font-size:10px;color:var(--ink-dim)}
+.rchip{flex:none;display:flex;align-items:center;gap:8px;background:none;border:1px solid var(--rule);color:var(--ink);font:inherit;padding:0 10px;cursor:pointer;white-space:nowrap}
+.rchip:hover,.rchip[aria-pressed=true]{border-color:var(--gold);color:var(--gold)}
+.rchip em{font-style:normal;font-family:var(--display);font-weight:600;font-size:17px;color:var(--gold);font-variant-numeric:tabular-nums}
+.rchip i{width:7px;height:7px;border-radius:50%;flex:none}
+.safe{background:var(--ok);color:var(--ok)}.check{background:var(--gold);color:var(--gold)}.look{background:var(--crit);color:var(--crit)}
+.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--rule);padding:1px 8px;font-size:11px;align-self:flex-start}
+.pill i{width:7px;height:7px;border-radius:50%}
+#rExtra ol{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:5px}
+#rExtra pre.cmd{margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:11px;border:1px solid var(--rule);padding:10px;color:var(--ink);background:rgba(0,0,0,.3)}
+.panel{position:absolute;background:var(--panel);border:1px solid var(--rule);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:14px 16px;max-height:calc(100% - 84px);overflow:auto}
+#key{left:16px;top:68px;width:292px;display:flex;flex-direction:column;gap:11px}
+#key>*{flex:none}
+.togs{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+#rec{right:16px;top:68px;width:320px;display:none;flex-direction:column;gap:8px}
+#rec.on{display:flex}
+h1{white-space:nowrap;font-family:var(--display);font-weight:600;font-size:27px;line-height:1;margin:0;letter-spacing:.01em}
+h2{font-family:var(--display);font-weight:600;font-size:20px;line-height:1.15;margin:0;overflow-wrap:anywhere}
+.eyebrow{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim)}
+p{margin:0}
+.dim{color:var(--ink-dim)}
+.num{color:var(--gold);font-variant-numeric:tabular-nums}
+hr{border:0;border-top:1px solid var(--rule);margin:0;width:100%}
+input[type=search]{width:100%;background:transparent;border:1px solid var(--rule);color:var(--ink);font:inherit;padding:7px 9px}
+input[type=search]:focus-visible,button:focus-visible{outline:1px solid var(--gold);outline-offset:1px}
+.seg{display:flex;border:1px solid var(--rule)}
+.seg button{flex:1;background:none;border:0;color:var(--ink-dim);font:inherit;padding:6px 4px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule)}
+.seg button[aria-pressed=true]{background:rgba(242,198,109,.14);color:var(--gold)}
+.chips{display:flex;flex-direction:column;gap:2px}
+.chip{display:flex;align-items:center;gap:8px;background:none;border:0;color:var(--ink);font:inherit;padding:3px 2px;cursor:pointer;text-align:left}
+.chip i{width:9px;height:9px;border-radius:50%;flex:none;box-shadow:0 0 8px currentColor}
+.chip span{flex:1}
+.chip b{font-weight:400;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+.chip.off{opacity:.35}
+.chip:hover span{color:var(--gold)}
+label.tog{display:flex;gap:8px;align-items:center;cursor:pointer}
+label.tog input{accent-color:var(--gold);margin:0}
+.row{display:flex;justify-content:space-between;gap:12px}
+.row span:last-child{text-align:right;overflow-wrap:anywhere}
+.path{overflow-wrap:anywhere;color:var(--ink-dim)}
+.list{display:flex;flex-direction:column;gap:2px;max-height:190px;overflow:auto}
+.list button{background:none;border:0;color:var(--ink);font:inherit;text-align:left;padding:3px 0;cursor:pointer;overflow-wrap:anywhere}
+.list button:hover{color:var(--gold)}
+#rec.media{width:min(600px,calc(100% - 356px))}
+#rec.wide{width:min(860px,calc(100% - 356px))}
+.ph{aspect-ratio:16/9;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:#000;border:1px solid var(--rule);color:var(--ink);font:inherit;cursor:pointer;padding:16px;text-align:center}
+.ph.audio{aspect-ratio:auto;padding:18px 16px}
+.ph:hover{border-color:var(--gold)}
+.ph i{width:54px;height:54px;border:1px solid var(--gold);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--gold);font-style:normal;font-size:20px;padding-left:4px}
+.ph span{max-width:38ch;color:var(--ink-dim)}
+#rPrev{display:flex;flex-direction:column;gap:8px;margin:4px 0 6px}
+#rPrev:empty{display:none}
+#rPrev audio{width:100%}
+#rPrev iframe{width:100%;height:56vh;border:1px solid var(--rule);background:#fff}
+#rec.wide #rPrev iframe{height:72vh}
+a.btn{text-decoration:none;display:inline-block}
+#rPrev video{width:100%;max-height:58vh;display:block;background:#000}
+#rPrev img,#rPrev canvas{max-width:100%;max-height:58vh;display:block;margin:0 auto;background:#000}
+#rec.wide #rPrev video,#rec.wide #rPrev img,#rec.wide #rPrev canvas{max-height:72vh}
+#rPrev pre{margin:0;max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:11px;border:1px solid var(--rule);padding:10px;color:var(--ink)}
+#rec.wide #rPrev pre,#rec.wide #rPrev .doc{max-height:62vh}
+#rPrev .doc{max-height:340px;overflow:auto;background:#f3efe4;color:#1d1b17;padding:14px 16px;font-family:var(--display);font-size:16px;line-height:1.45}
+#rPrev .doc img{max-width:100%;background:none}
+#rPrev .doc table{border-collapse:collapse}#rPrev .doc td,#rPrev .doc th{border:1px solid #bbb;padding:2px 6px}
+.bar{display:flex;height:10px;width:100%;border:1px solid var(--rule);margin:8px 0 4px}
+.bar i{display:block;height:100%}
+.meter{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;margin:3px 0}
+.meter button,.meter span.n{background:none;border:0;color:var(--ink);font:inherit;text-align:left;padding:0;overflow-wrap:anywhere}
+.meter button{cursor:pointer}.meter button:hover{color:var(--gold)}
+.meter em{font-style:normal;color:var(--gold);font-variant-numeric:tabular-nums;white-space:nowrap}
+.meter u{grid-column:1/-1;display:block;height:3px;background:var(--gold);opacity:.7;text-decoration:none;min-width:1px}
+.meter u.grey{background:var(--ink-dim)}
+.seg-bar{display:flex;gap:2px;height:28px;width:100%;margin:8px 0 10px}
+.seg-bar>div{height:100%;border-radius:4px;min-width:2px;display:flex;align-items:center;padding-left:6px;overflow:hidden;font-size:11px;font-weight:500;color:#0b0b0b;white-space:nowrap;cursor:default}
+.seg-bar>div:focus-visible{outline:1px solid var(--ink);outline-offset:2px}
+.seg-bar>div.free{background:none!important;border:1px dashed var(--ink-dim);color:var(--ink-dim)}
+.seg-bar>div.grey{color:#0b0b0b}
+.leg{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:3px 10px;align-items:center}
+.leg i{width:10px;height:10px;border-radius:2px;display:block}
+.leg i.free{border:1px dashed var(--ink-dim)}
+.leg span{overflow-wrap:anywhere}
+.leg em,.leg b{font-style:normal;font-weight:400;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.leg b{color:var(--ink-dim)}
+.hero{font-family:var(--display);font-weight:600;font-size:26px;line-height:1.1;margin:0}
+.hero small{font-family:var(--mono);font-weight:400;font-size:12px;color:var(--ink-dim);margin-left:8px}
+.pbar{display:grid;grid-template-columns:minmax(0,150px) minmax(0,1fr) auto;gap:4px 10px;align-items:center}
+.pbar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pbar u{display:block;height:8px;border-radius:0 4px 4px 0;background:var(--s1);text-decoration:none;min-width:2px}
+.pbar em{font-style:normal;font-variant-numeric:tabular-nums;white-space:nowrap}
+.grp{border-top:1px solid var(--rule);padding:8px 0;display:flex;flex-direction:column;gap:3px}
+.grp h3{margin:0;font:inherit;display:flex;justify-content:space-between;gap:10px}
+.grp h3 span:first-child{overflow-wrap:anywhere;color:var(--ink)}
+.grp label{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.grp label input{accent-color:var(--gold);margin:3px 0 0;flex:none}
+.grp label button{background:none;border:0;color:var(--ink-dim);font:inherit;text-align:left;padding:0;cursor:pointer;overflow-wrap:anywhere}
+.grp label button:hover{color:var(--gold)}
+.tag{font-size:10px;border:1px solid var(--rule);padding:0 5px;color:var(--ink-dim);white-space:nowrap}
+.sticky{position:sticky;bottom:-14px;background:#0a101d;border-top:1px solid var(--rule);padding:10px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:-14px}
+.sec{margin:12px 0 4px}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.btn{background:none;border:1px solid var(--rule);color:var(--ink);font:inherit;font-size:11px;padding:4px 9px;cursor:pointer}
+.btn:hover{color:var(--gold);border-color:var(--gold)}
+.pager{display:flex;align-items:center;gap:8px;justify-content:center}
+#drop{position:absolute;inset:12px;border:1px dashed var(--gold);background:rgba(6,10,19,.78);display:none;align-items:center;justify-content:center;font-family:var(--display);font-style:italic;font-size:28px;z-index:9;pointer-events:none;text-align:center;padding:24px}
+#drop.on{display:flex}
+#close{position:absolute;right:8px;top:6px;background:none;border:0;color:var(--ink-dim);font:inherit;font-size:16px;cursor:pointer}
+#tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--rule);padding:4px 8px;display:none;max-width:320px;overflow-wrap:anywhere;z-index:5}
+#hint{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);color:var(--ink-dim);font-size:11px;text-align:center;padding:0 16px;text-shadow:0 0 6px var(--sky)}
+#msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:22px;font-style:italic;padding:24px;text-align:center}
+#fold{display:none}
+@media (max-width:760px){
+  #key.folded>.eyebrow{display:block}
+  #rec,#rec.media,#rec.wide{left:16px;right:16px;top:68px;bottom:auto;width:auto;max-height:70%}
+  #key{width:auto;right:16px;max-height:46%}
+  #hint{display:none}
+  #fold{display:block;position:absolute;right:10px;top:10px;z-index:1;background:none;border:1px solid var(--rule);color:var(--ink);font:inherit;padding:2px 8px;cursor:pointer}
+  #key.folded>*:not(.head):not(#fold):not(.eyebrow){display:none}
+  #sys,#net{display:none}
+  #bSys{display:inline-block}
+}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Three-dimensional map of files drawn as stars"></canvas>
+<div id="labels"></div>
+
+<nav id="recs" aria-label="Recommendations for this computer"></nav>
+
+<div id="sys" aria-live="off"></div>
+<div id="net" aria-live="off"></div>
+
+<section class="panel" id="key">
+  <button id="fold" type="button" aria-label="Show or hide the chart key">key</button>
+  <p class="eyebrow" style="margin-bottom:-8px">Chart of the home folder</p>
+  <div class="head">
+    <h1>StarMap</h1>
+    <button id="home" type="button">Whole sky</button>
+  </div>
+  <div class="figs" id="figs"></div>
+  <p id="stats" class="dim"></p>
+  <div class="acts" style="margin-top:0"><button type="button" class="btn" id="bSys">Disk and memory</button><button type="button" class="btn" id="bSpace">Where the space goes</button><button type="button" class="btn" id="bCopies">Review copies</button></div>
+  <input type="search" id="q" placeholder="Find a file or folder name" autocomplete="off" aria-label="Find a file or folder name">
+  <div id="hits" class="list" hidden></div>
+  <hr>
+  <div>
+    <p class="eyebrow" style="margin-bottom:6px">Colour stars by</p>
+    <div class="seg" id="mode">
+      <button type="button" data-m="type" aria-pressed="true">Type</button>
+      <button type="button" data-m="age" aria-pressed="false">Age</button>
+      <button type="button" data-m="home" aria-pressed="false">Region</button>
+    </div>
+  </div>
+  <div class="chips" id="legend"></div>
+  <hr>
+  <div class="togs">
+    <label class="tog" for="tLines"><input type="checkbox" id="tLines" checked> Folder lines</label>
+    <label class="tog" for="tDup"><input type="checkbox" id="tDup" checked> Copy arcs</label>
+    <label class="tog" for="tNeb"><input type="checkbox" id="tNeb" checked> Nebulae</label>
+    <label class="tog" for="tSpin"><input type="checkbox" id="tSpin" checked> Slow rotation</label>
+  </div>
+  <p class="dim" style="font-size:11px"><span id="dupN"></span> files have a same-name, same-size copy in another folder.</p>
+  <hr>
+  <p class="dim" style="font-size:11px" id="conn"></p>
+</section>
+
+<aside class="panel" id="rec" aria-live="polite">
+  <button id="close" type="button" aria-label="Close">×</button>
+  <p class="eyebrow" id="rKind"></p>
+  <h2 id="rName"></h2>
+  <p class="path" id="rPath"></p>
+  <hr>
+  <div id="rPrev"></div>
+  <div id="rRows"></div>
+  <div class="acts" id="rActs"></div>
+  <div id="rExtra"></div>
+</aside>
+
+<div id="ring"></div>
+<div id="scan" role="dialog" aria-modal="true" aria-labelledby="sTitle"><div class="box">
+  <p class="eyebrow">Scan</p>
+  <h2 id="sTitle">Reading this computer</h2>
+  <p class="dim" id="sIntro">StarMap reads file names, sizes and dates. Nothing leaves this computer. The first scan can take a few minutes on a full drive.</p>
+  <div class="prog" id="sProg" hidden><i id="sBar"></i></div>
+  <p id="sStat" class="dim" aria-live="polite"></p>
+  <div class="acts" style="margin:0"><button type="button" class="btn" id="sRetry" hidden>Try again</button><button type="button" class="btn" id="sCancel">Cancel</button></div>
+</div></div>
+<div id="tip"></div>
+<p id="hint">Drag to turn · scroll to zoom · shift-drag to move · click a star or a name · double-click to fly there</p>
+<div id="msg">Charting the sky…</div>
+
+<script src="/vendor/three.min.js"></script>
+<script>
+(async function(){
+const $=id=>document.getElementById(id);
+const msg=$('msg');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function api(path,body,ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||8000);
+  try{const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:c.signal,credentials:'same-origin'});
+    let j=null;try{j=await r.json();}catch(e){}
+    if(!r.ok){const err=new Error(j&&j.error?j.error:'request failed ('+r.status+')');err.status=r.status;throw err;}
+    return j;}
+  catch(e){if(e&&e.name==='AbortError')throw new Error('StarMap did not answer in time');if(e instanceof TypeError)throw new Error('StarMap is not running');throw e;}
+  finally{clearTimeout(t);}}
+let INFO;
+try{INFO=await api('/api/info');}
+catch(e){msg.textContent=e.status===403?'This page is locked. Open StarMap from the address shown in the window where it is running.':'StarMap is not running. Start it again, then reload this page.';return;}
+const PLATFORM=INFO.platform,SYSNAME=INFO.sysDir||'';
+const isMac=PLATFORM==='darwin',isWin=PLATFORM==='win32',isLinux=!isMac&&!isWin;
+const OSNAME=isMac?'Mac':isWin?'PC':'computer',FILEMGR=isMac?'Finder':isWin?'File Explorer':'file manager',SHELL=isWin?'PowerShell':'Terminal',TRASH=isWin?'Recycle Bin':'Trash';
+
+/* ---------- scan dialog: the first scan and every re-scan ---------- */
+let scanBusy=false;
+async function runScanUI(prev,first){
+  $('scan').classList.add('on');$('sRetry').hidden=true;$('sIntro').hidden=false;$('sProg').hidden=false;$('sProg').classList.toggle('indet',!prev);$('sBar').style.width='0%';
+  $('sTitle').textContent=first?'Mapping this '+OSNAME+' for the first time':'Reading this '+OSNAME+' again';
+  $('sCancel').hidden=false;$('sCancel').textContent='Stop';$('sStat').textContent='Starting…';scanBusy=true;
+  try{
+    await api('/api/scan',{prev:prev||0});
+    for(;;){await sleep(300);const p=await api('/api/progress');
+      if(p.state==='running'||p.state==='stopping'){if(p.pct!=null){$('sProg').classList.remove('indet');$('sBar').style.width=p.pct.toFixed(1)+'%';}
+        $('sStat').textContent=p.stage+' · '+p.seen.toLocaleString()+' items in '+Math.round(p.elapsed)+' s · '+p.where;continue;}
+      if(p.state==='done')break;
+      throw new Error(p.error==='stopped'?'stopped':(p.error||'the scan stopped'));}
+    $('sProg').classList.remove('indet');$('sBar').style.width='100%';$('sStat').textContent='Done. Drawing the map…';setTimeout(()=>location.reload(),400);
+  }catch(e){scanBusy=false;$('sProg').hidden=true;$('sRetry').hidden=false;$('sRetry').textContent=first?'Scan again':'Try again';$('sCancel').textContent='Close';$('sCancel').hidden=!!first;
+    $('sStat').textContent=e&&e.message==='stopped'?'Scan stopped. Nothing was changed.':'The scan could not finish: '+(e&&e.message?e.message:'unknown error')+'.';}
+}
+let hasData=false,prevTotalAll=0;
+$('sRetry').onclick=()=>runScanUI(prevTotalAll,!hasData);
+$('sCancel').onclick=()=>{if(scanBusy)api('/api/stop',{}).catch(()=>{});else $('scan').classList.remove('on');};
+
+let dirs, files, extra=null, data=null;
+if(INFO.hasScan&&INFO.state!=='running'){try{data=await api('/api/data',null,120000);}
+  catch(e){if(e.status!==404){msg.textContent='The last scan could not be loaded: '+e.message+'.';return;}}}
+if(!data){msg.textContent='';runScanUI(0,true);return;}
+hasData=true;dirs=data.dirs;files=data.files;extra=data.extra||null;
+const scanId=(extra&&extra.scannedAt)||0;
+if(!window.THREE){msg.textContent='The 3D library did not load. Reload the page.';return;}
+
+/* ---------- data ---------- */
+const ND=dirs.length, NF=files.length;
+const TYPES=[
+ {k:'Writing',c:'#ffd98a',e:'md txt pdf doc docx rtf pages epub pptx ppt key odt tex'},
+ {k:'Code',c:'#7fb4ff',e:'ts tsx js jsx php py css html htm sh cjs mjs swift sol lsl rb go rs java c h cpp vue scss exp ps1 gds service conf'},
+ {k:'Images',c:'#ff8fb8',e:'png jpg jpeg webp svg heic gif ico bmp tiff psd ai'},
+ {k:'Audio',c:'#8fe3b0',e:'mp3 wav opus m4a flac aiff aif ogg mid'},
+ {k:'Video',c:'#c79bff',e:'mp4 mov mkv webm avi m4v'},
+ {k:'Data',c:'#74e0e6',e:'json csv xlsx xls sql xml yaml yml db sqlite plist strings tagset env toml numbers pbk'},
+ {k:'Archives',c:'#ff9a5c',e:'zip gz tgz tar dmg rar 7z pkg iso'},
+ {k:'Other',c:'#aab2c0',e:''}];
+const extMap={};TYPES.forEach((t,i)=>t.e.split(' ').forEach(x=>{if(x)extMap[x]=i}));
+const ftype=new Uint8Array(NF);
+const typeCount=TYPES.map(()=>0);
+for(let i=0;i<NF;i++){const n=files[i][0];const p=n.lastIndexOf('.');const x=p>0?n.slice(p+1).toLowerCase():'';const t=x in extMap?extMap[x]:7;ftype[i]=t;typeCount[t]++;}
+
+const kids=Array.from({length:ND},()=>[]);
+const nf=new Uint32Array(ND), sub=new Float64Array(ND), depth=new Uint16Array(ND), topOf=new Int32Array(ND);
+for(let i=0;i<NF;i++)nf[files[i][1]]++;
+for(let d=1;d<ND;d++){kids[dirs[d][1]].push(d);depth[d]=depth[dirs[d][1]]+1;topOf[d]=dirs[d][1]===0?d:topOf[dirs[d][1]];}
+for(let d=ND-1;d>=0;d--){sub[d]+=nf[d];if(d>0)sub[dirs[d][1]]+=sub[d];}
+const isNeb=d=>dirs[d][2]===1;
+const pathOf=d=>{const a=[];while(d>0){a.push(dirs[d][0]);d=dirs[d][1];}a.push('~');return a.reverse().join('/');};
+
+/* copies: same name and size, over 1 KB */
+const SIG=extra&&extra.sig?extra.sig:{};const BKB=extra&&extra.b?extra.b:{};
+const groups=new Map();
+for(let i=0;i<NF;i++){if(files[i][2]>1024){const k=files[i][0]+'|'+files[i][2]+'|'+(SIG[i]||'');const g=groups.get(k);g?g.push(i):groups.set(k,[i]);}}
+const dupOf=new Map();let dupFiles=0,dupBytes=0;
+groups.forEach(g=>{if(g.length>1){dupFiles+=g.length;dupBytes+=files[g[0]][2]*(g.length-1);g.forEach(i=>dupOf.set(i,g));}});
+
+/* ---------- layout ---------- */
+let seed=20261118;const rnd=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+const gauss=()=>{let u=0;for(let i=0;i<4;i++)u+=rnd();return (u-2)/0.58;};
+const own=new Float64Array(ND), rs=new Float64Array(ND);
+/* nested clusters: a folder is a ball sized by what it holds; each subfolder is a smaller ball inside it */
+for(let d=0;d<ND;d++){
+  own[d]=isNeb(d)?1:2.3*Math.cbrt(nf[d]+1);
+  rs[d]=isNeb(d)?1+Math.cbrt(Math.abs(dirs[d][3]))*0.07:2.7*Math.cbrt(sub[d]+1);
+}
+const dpos=new Float32Array(ND*3);
+for(let d=0;d<ND;d++){
+  const k=kids[d].length;if(!k)continue;
+  const px=dpos[d*3],py=dpos[d*3+1],pz=dpos[d*3+2];
+  let ox=0,oy=0,oz=0;
+  if(d>0){const p=dirs[d][1];ox=px-dpos[p*3];oy=py-dpos[p*3+1];oz=pz-dpos[p*3+2];const l=Math.hypot(ox,oy,oz)||1;ox/=l;oy/=l;oz/=l;}
+  const ph=rnd()*6.283;
+  const order=kids[d].slice().sort((a,b)=>rs[b]-rs[a]);
+  let stride=Math.max(1,Math.round(k*0.382));const gcd=(a,b)=>b?gcd(b,a%b):a;while(gcd(stride,k)!==1)stride++;
+  if(d===0){
+    /* top level: pack regions on a disc, largest at the core, the rest spiralling out */
+    const placed=[];
+    order.forEach(c=>{
+      const rc=rs[c]+(isNeb(c)?3:5);
+      for(let t=0;;t++){
+        const r=placed.length?6.6*Math.sqrt(t):0, a=t*2.399963+ph, x=Math.cos(a)*r, z=Math.sin(a)*r;
+        let ok=true;for(const p of placed){if(Math.hypot(x-p[0],z-p[1])<rc+p[2]){ok=false;break;}}
+        if(ok){placed.push([x,z,rc]);dpos[c*3]=x;dpos[c*3+1]=placed.length>1?(rnd()-0.5)*Math.min(26,r*0.22):0;dpos[c*3+2]=z;break;}
+      }
+    });
+    continue;
+  }
+  order.forEach((c,i)=>{
+    const j=(i*stride)%k;
+    let y=1-2*(j+0.5)/k, r=Math.sqrt(1-y*y), a=j*2.399963+ph;
+    let x=Math.cos(a)*r, z=Math.sin(a)*r;
+    x+=ox*0.45;y+=oy*0.45;z+=oz*0.45;const l=Math.hypot(x,y,z)||1;x/=l;y/=l;z/=l;
+    const dist=Math.max(rs[d]-rs[c],0)*0.95+0.8+0.6*Math.min(4,Math.sqrt(k));
+    dpos[c*3]=px+x*dist;dpos[c*3+1]=py+y*dist;dpos[c*3+2]=pz+z*dist;
+  });
+}
+const fpos=new Float32Array(NF*3);
+let ext=0;
+for(let i=0;i<NF;i++){const d=files[i][1];const s=own[d]*0.34;
+  const x=dpos[d*3]+gauss()*s,y=dpos[d*3+1]+gauss()*s,z=dpos[d*3+2]+gauss()*s;
+  fpos[i*3]=x;fpos[i*3+1]=y;fpos[i*3+2]=z;}
+let cx=0,cy=0,cz=0;{const lo=[1e9,1e9,1e9],hi=[-1e9,-1e9,-1e9];for(let i=0;i<NF*3;i++){const a=i%3;if(fpos[i]<lo[a])lo[a]=fpos[i];if(fpos[i]>hi[a])hi[a]=fpos[i];}cx=(lo[0]+hi[0])/2;cy=(lo[1]+hi[1])/2;cz=(lo[2]+hi[2])/2;}
+for(let i=0;i<NF;i++)ext=Math.max(ext,Math.hypot(fpos[i*3]-cx,fpos[i*3+1]-cy,fpos[i*3+2]-cz));
+
+/* ---------- scene ---------- */
+const canvas=$('c');
+let renderer;
+try{renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});}
+catch(e){msg.textContent='This browser could not start 3D graphics (WebGL), so the map cannot be drawn here.';return;}
+renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(50,1,0.1,ext*40);
+const VS=`attribute float size;attribute float alpha;attribute vec3 aColor;uniform float uScale;uniform float uTime;uniform float uNear;uniform float uFar;uniform float uGain;varying vec3 vC;varying float vA;
+void main(){vC=aColor;vec4 mv=modelViewMatrix*vec4(position,1.0);float z=-mv.z;
+float h=fract(sin(dot(position.xy,vec2(12.9898,78.233)))*43758.5453);
+float tw=0.86+0.14*sin(uTime*1.4+h*60.0);
+vA=alpha*uGain*tw*mix(1.0,0.4,smoothstep(uNear,uFar,z));
+gl_PointSize=max(1.5,size*uScale/z);gl_Position=projectionMatrix*mv;}`;
+const FS=`precision mediump float;varying vec3 vC;varying float vA;uniform float uSoft;
+void main(){float d=length(gl_PointCoord-0.5);if(d>0.5)discard;float halo=pow(smoothstep(0.5,0.0,d),uSoft);float core=smoothstep(0.16,0.0,d);
+gl_FragColor=vec4(vC*halo*0.85+vec3(1.0,0.97,0.92)*core*0.3,(halo*0.7+core*0.3)*vA);}`;
+function pointsOf(pos,n,soft){
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aColor',new THREE.BufferAttribute(new Float32Array(n*3),3));
+  g.setAttribute('size',new THREE.BufferAttribute(new Float32Array(n),1));
+  g.setAttribute('alpha',new THREE.BufferAttribute(new Float32Array(n).fill(1),1));
+  const m=new THREE.ShaderMaterial({uniforms:{uScale:{value:300},uSoft:{value:soft},uTime:{value:0},uNear:{value:1},uFar:{value:1e6},uGain:{value:1}},vertexShader:VS,fragmentShader:FS,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});
+  const p=new THREE.Points(g,m);p.frustumCulled=false;return p;
+}
+const stars=pointsOf(fpos,NF,2.1);
+const sizeA=stars.geometry.attributes.size.array, colA=stars.geometry.attributes.aColor.array, alpA=stars.geometry.attributes.alpha.array;
+for(let i=0;i<NF;i++)sizeA[i]=0.7+Math.pow(Math.log10(files[i][2]+10),1.7)*0.13;
+
+const nebIdx=[];for(let d=1;d<ND;d++)if(isNeb(d))nebIdx.push(d);
+const npos=new Float32Array(nebIdx.length*3);
+nebIdx.forEach((d,i)=>{npos[i*3]=dpos[d*3];npos[i*3+1]=dpos[d*3+1];npos[i*3+2]=dpos[d*3+2];});
+const nebs=pointsOf(npos,nebIdx.length,3.0);
+nebIdx.forEach((d,i)=>{const a=nebs.geometry.attributes;a.size.array[i]=3+Math.log10(Math.abs(dirs[d][3])+1)*3.2;a.aColor.array.set([0.5,0.36,0.95],i*3);a.alpha.array[i]=0.55;});
+
+function linesOf(arr,color,op){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(arr),3));
+  const l=new THREE.LineSegments(g,new THREE.LineBasicMaterial({color,transparent:true,opacity:op,depthWrite:false,blending:THREE.AdditiveBlending}));l.frustumCulled=false;return l;}
+const la=[];for(let d=1;d<ND;d++){const p=dirs[d][1];la.push(dpos[p*3],dpos[p*3+1],dpos[p*3+2],dpos[d*3],dpos[d*3+1],dpos[d*3+2]);}
+const treeLines=linesOf(la,0x7f97cf,0.13);
+const pairN=new Map();
+groups.forEach(g=>{if(g.length>1)for(let j=1;j<g.length;j++){const a=files[g[0]][1],b=files[g[j]][1];if(a===b)continue;const k=a<b?a+'|'+b:b+'|'+a;pairN.set(k,(pairN.get(k)||0)+1);}});
+const pairsOf=new Map();const da=[],dc=[];let pmax=1;pairN.forEach(n=>{if(n>pmax)pmax=n;});
+pairN.forEach((n,k)=>{const [a,b]=k.split('|').map(Number);
+  (pairsOf.get(a)||pairsOf.set(a,[]).get(a)).push([b,n]);(pairsOf.get(b)||pairsOf.set(b,[]).get(b)).push([a,n]);
+  const ax=dpos[a*3],ay=dpos[a*3+1],az=dpos[a*3+2],bx=dpos[b*3],by=dpos[b*3+1],bz=dpos[b*3+2];
+  const len=Math.hypot(bx-ax,by-ay,bz-az);const mx=(ax+bx)/2,my=(ay+by)/2+len*0.32,mz=(az+bz)/2;
+  const s=0.1+0.9*Math.log(1+n)/Math.log(1+pmax);const col=[0.95*s,0.78*s,0.43*s];
+  const SEG=20;let qx=ax,qy=ay,qz=az;
+  for(let i=1;i<=SEG;i++){const t=i/SEG,u=1-t;const x=u*u*ax+2*u*t*mx+t*t*bx,y=u*u*ay+2*u*t*my+t*t*by,z=u*u*az+2*u*t*mz+t*t*bz;
+    const f=0.35+0.65*Math.sin(Math.PI*t);da.push(qx,qy,qz,x,y,z);dc.push(col[0]*f,col[1]*f,col[2]*f,col[0]*f,col[1]*f,col[2]*f);qx=x;qy=y;qz=z;}
+});
+const dupLines=linesOf(da,0xffffff,0.3);dupLines.geometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(dc),3));dupLines.material.vertexColors=true;
+const selLines=linesOf([],0xfff0c0,0.9);
+const glowTex=(()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');const g=x.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'rgba(255,255,255,.55)');g.addColorStop(.35,'rgba(255,255,255,.16)');g.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=g;x.fillRect(0,0,128,128);return new THREE.CanvasTexture(c);})();
+const glows=new THREE.Group();
+scene.add(glows,treeLines,dupLines,nebs,stars,selLines);
+
+/* ---------- colour ---------- */
+const hex=h=>[parseInt(h.slice(1,3),16)/255,parseInt(h.slice(3,5),16)/255,parseInt(h.slice(5,7),16)/255];
+const typeRGB=TYPES.map(t=>hex(t.c));
+const tops=kids[0].filter(d=>sub[d]>0||isNeb(d)).sort((a,b)=>sub[b]-sub[a]);
+const topType=new Map();for(let i=0;i<NF;i++){const t=topOf[files[i][1]];if(!t)continue;let a=topType.get(t);if(!a){a=new Uint32Array(8);topType.set(t,a);}a[ftype[i]]++;}
+tops.forEach(d=>{if(isNeb(d)||sub[d]<20)return;const a=topType.get(d);let m=0;for(let i=1;i<8;i++)if(a[i]>a[m])m=i;const c=typeRGB[m];
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:new THREE.Color(c[0],c[1],c[2]),transparent:true,opacity:0.16,depthWrite:false,depthTest:false,blending:THREE.AdditiveBlending}));
+  sp.position.set(dpos[d*3],dpos[d*3+1],dpos[d*3+2]);sp.scale.setScalar(rs[d]*4.2);glows.add(sp);});
+const HOMEC=['#ffd98a','#7fb4ff','#ff8fb8','#8fe3b0','#c79bff','#74e0e6','#ff9a5c','#e6e08a','#9fb0ff','#ffb3a0'];
+const homeIdx=new Map();tops.forEach((d,i)=>homeIdx.set(d,i));
+let tMin=Infinity,tMax=-Infinity;const ts=files.map(f=>f[3]).sort((a,b)=>a-b);tMin=ts[Math.floor(NF*0.02)];tMax=ts[NF-1];
+const AGE=[[1,.38,.3],[1,.72,.4],[1,.95,.8],[.62,.8,1]];
+function ageRGB(t){let u=Math.max(0,Math.min(1,(t-tMin)/(tMax-tMin||1)));u=Math.pow(u,2.2)*3;const i=Math.min(2,Math.floor(u)),f=u-i;return [0,1,2].map(k=>AGE[i][k]+(AGE[i+1][k]-AGE[i][k])*f);}
+let mode='type';const typeOff=new Set();let query='';
+const fdirPath=new Map();
+function matches(i){if(!query)return true;if(files[i][0].toLowerCase().includes(query))return true;const d=files[i][1];let p=fdirPath.get(d);if(p===undefined){p=pathOf(d).toLowerCase();fdirPath.set(d,p);}return p.includes(query);}
+function paint(){
+  for(let i=0;i<NF;i++){
+    let c;if(mode==='type')c=typeRGB[ftype[i]];else if(mode==='age')c=ageRGB(files[i][3]);else{const h=homeIdx.get(topOf[files[i][1]]);c=h===undefined?typeRGB[7]:hex(HOMEC[h%HOMEC.length]);}
+    colA[i*3]=c[0];colA[i*3+1]=c[1];colA[i*3+2]=c[2];
+    alpA[i]=typeOff.has(ftype[i])?0.0:(matches(i)?1:0.05);
+  }
+  stars.geometry.attributes.aColor.needsUpdate=true;stars.geometry.attributes.alpha.needsUpdate=true;
+  legend();
+}
+const fmtN=n=>n.toLocaleString();
+const fmtB=b=>b>=1e9?(b/1e9).toFixed(2)+' GB':b>=1e6?(b/1e6).toFixed(1)+' MB':b>=1e3?(b/1e3).toFixed(0)+' KB':Math.round(b)+' B';
+const fmtD=t=>new Date(t*1000).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});
+function legend(){
+  const L=$('legend');L.textContent='';
+  const add=(col,name,n,on,click)=>{const b=document.createElement('button');b.type='button';b.className='chip'+(on?'':' off');
+    const i=document.createElement('i');i.style.background=col;i.style.color=col;const s=document.createElement('span');s.textContent=name;const c=document.createElement('b');c.textContent=n;b.append(i,s,c);if(click)b.onclick=click;else b.style.cursor='default';L.append(b);};
+  if(mode==='type')TYPES.forEach((t,i)=>add(t.c,t.k,fmtN(typeCount[i]),!typeOff.has(i),()=>{typeOff.has(i)?typeOff.delete(i):typeOff.add(i);paint();}));
+  else if(mode==='age'){add('#9ecbff','Newest, '+fmtD(tMax),'',true);add('#fff2cc','Recent months','',true);add('#ffb866','Older','',true);add('#ff614d','Oldest, '+fmtD(tMin)+' or before','',true);}
+  else tops.slice(0,12).forEach((d,i)=>add(HOMEC[i%HOMEC.length],dirs[d][0],fmtN(sub[d]),true,()=>flyTo(dpos[d*3],dpos[d*3+1],dpos[d*3+2],rs[d]*3)));
+}
+
+/* ---------- labels ---------- */
+const labBox=$('labels');const labs=[];
+for(let d=1;d<ND;d++){
+  const top=dirs[d][1]===0;
+  if(isNeb(d)){if(Math.abs(dirs[d][3])<(top?2000:6000))continue;}
+  else if(sub[d]<(top?15:45))continue;
+  const b=document.createElement('button');b.type='button';b.className='lab '+(top?'t1':depth[d]===2?'t2':'t3');b.textContent=dirs[d][0].length>34?dirs[d][0].slice(0,32)+'…':dirs[d][0];
+  const s=document.createElement('small');s.textContent=isNeb(d)?fmtN(Math.abs(dirs[d][3]))+(dirs[d][3]<0?'+':''):fmtN(sub[d]);b.append(s);
+  b.onclick=()=>{flyTo(dpos[d*3],dpos[d*3+1],dpos[d*3+2],Math.max(rs[d]*3.1,14));showDir(d);};
+  labBox.append(b);labs.push({d,el:b,top,w:b.textContent.length*(top?9.6:7.6)+16,on:false,pr:0,x:0,y:0});
+}
+function layoutLabels(w,h){
+  const f=h/2/Math.tan(cam.fov*Math.PI/360);
+  for(const L of labs){v.set(dpos[L.d*3],dpos[L.d*3+1],dpos[L.d*3+2]).applyMatrix4(cam.matrixWorldInverse);const z=-v.z;
+    if(z<1){L.pr=-1;continue;}
+    const R=rs[L.d]*f/z;L.x=w/2+v.x*f/z;L.y=h/2-v.y*f/z-Math.min(R*0.75,h*0.3)-8;
+    let ok=L.x>-40&&L.x<w+40&&L.y>96&&L.y<h-10&&R<h*0.8;
+    if(ok&&!L.top)ok=R>(depth[L.d]===2?34:46);
+    L.pr=ok?(L.top?1e6:0)+R:-1;
+  }
+  const order=labs.filter(L=>L.pr>=0).sort((a,b)=>b.pr-a.pr);const boxes=[];const kw=innerWidth>760?324:0;if(kw){const sr=$('sys').getBoundingClientRect();if(sr.height)boxes.push([sr.left-8,sr.right+8,sr.top-8,sr.bottom+8]);const nr=$('net').getBoundingClientRect();if(nr.height)boxes.push([nr.left-8,nr.right+8,nr.top-8,nr.bottom+8]);}
+  for(const L of labs)L.on=false;
+  for(const L of order){if(boxes.length>=26)break;const x0=L.x-L.w/2,x1=L.x+L.w/2,y0=L.y-30,y1=L.y+4;
+    if(kw&&x0<kw)continue;
+    let hit=false;for(const b of boxes){if(x0<b[1]&&x1>b[0]&&y0<b[3]&&y1>b[2]){hit=true;break;}}
+    if(hit)continue;boxes.push([x0,x1,y0,y1]);L.on=true;}
+  for(const L of labs){if(L.on){L.el.style.display='block';L.el.style.transform='translate(-50%,-100%) translate('+L.x.toFixed(1)+'px,'+L.y.toFixed(1)+'px)';}else if(L.el.style.display!=='none')L.el.style.display='none';}
+}
+
+/* ---------- camera ---------- */
+const reduceM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const tgt=new THREE.Vector3(cx,cy,cz), tgtTo=new THREE.Vector3(cx,cy,cz);
+let dist=ext*(reduceM?2.15:3.6), distTo=ext*2.15, th=0.5, phi=1.02, flying=true, spin=true, touched=false;
+const reduce=reduceM;if(reduce){spin=false;$('tSpin').checked=false;}
+function flyTo(x,y,z,d){tgtTo.set(x,y,z);distTo=d;flying=true;if(reduce){tgt.copy(tgtTo);dist=distTo;}}
+function placeCam(){const s=Math.sin(phi);cam.position.set(tgt.x+dist*s*Math.sin(th),tgt.y+dist*Math.cos(phi),tgt.z+dist*s*Math.cos(th));cam.lookAt(tgt);if(innerWidth>760)cam.translateX(-dist*0.1);}
+function resize(){const w=canvas.clientWidth,h=canvas.clientHeight;renderer.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();const s=h*0.66*renderer.getPixelRatio();stars.material.uniforms.uScale.value=s;nebs.material.uniforms.uScale.value=s;}
+addEventListener('resize',resize);resize();
+
+const ptrs=new Map();let moved=0,pinch=0;
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,b:e.button,sh:e.shiftKey});moved=0;canvas.classList.add('drag');touched=true;flying=false;
+  if(ptrs.size===2){const [a,b]=[...ptrs.values()];pinch=Math.hypot(a.x-b.x,a.y-b.y);}});
+canvas.addEventListener('pointermove',e=>{
+  const p=ptrs.get(e.pointerId);
+  if(!p){hover(e);return;}
+  const dx=e.clientX-p.x,dy=e.clientY-p.y;p.x=e.clientX;p.y=e.clientY;moved+=Math.abs(dx)+Math.abs(dy);
+  if(ptrs.size===2){const [a,b]=[...ptrs.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);if(pinch)dist=distTo=Math.max(1.5,Math.min(ext*6,dist*pinch/d));pinch=d;return;}
+  if(p.b===2||p.sh){const k=dist*0.0016;const r=new THREE.Vector3().setFromMatrixColumn(cam.matrix,0),u=new THREE.Vector3().setFromMatrixColumn(cam.matrix,1);tgt.addScaledVector(r,-dx*k).addScaledVector(u,dy*k);tgtTo.copy(tgt);}
+  else{th-=dx*0.005;phi=Math.max(0.05,Math.min(3.09,phi-dy*0.005));}
+});
+const up=e=>{const p=ptrs.get(e.pointerId);ptrs.delete(e.pointerId);if(!ptrs.size)canvas.classList.remove('drag');pinch=0;if(p&&moved<5&&e.type==='pointerup')click(e);};
+canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+canvas.addEventListener('wheel',e=>{e.preventDefault();touched=true;flying=false;dist=distTo=Math.max(1.5,Math.min(ext*6,dist*Math.exp(e.deltaY*0.0012)));},{passive:false});
+canvas.addEventListener('dblclick',e=>{const h=pick(e);if(h&&h.f>=0)flyTo(fpos[h.f*3],fpos[h.f*3+1],fpos[h.f*3+2],Math.max(8,own[files[h.f][1]]*4));else if(h)flyTo(dpos[h.n*3],dpos[h.n*3+1],dpos[h.n*3+2],14);});
+
+/* ---------- picking ---------- */
+const v=new THREE.Vector3();
+function pick(e){
+  const r=canvas.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,w=r.width,h=r.height;
+  const m=new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix,cam.matrixWorldInverse).elements;
+  let best=null,bs=1e9;
+  const test=(x,y,z,rad,o)=>{const cw=m[3]*x+m[7]*y+m[11]*z+m[15];if(cw<=0)return;const sx=((m[0]*x+m[4]*y+m[8]*z+m[12])/cw*0.5+0.5)*w,sy=(1-((m[1]*x+m[5]*y+m[9]*z+m[13])/cw*0.5+0.5))*h;
+    const d=Math.hypot(sx-mx,sy-my);if(d<rad){const s=d+cw*0.02;if(s<bs){bs=s;best=o;}}};
+  for(let i=0;i<NF;i++){if(alpA[i]<0.5)continue;test(fpos[i*3],fpos[i*3+1],fpos[i*3+2],9,{f:i});}
+  if(nebs.visible)nebIdx.forEach(d=>test(dpos[d*3],dpos[d*3+1],dpos[d*3+2],12,{f:-1,n:d}));
+  return best;
+}
+const tip=$('tip');
+function hover(e){if(e.pointerType==='touch')return;const h=pick(e);if(!h){tip.style.display='none';return;}
+  tip.textContent=h.f>=0?files[h.f][0]+' · '+fmtB(files[h.f][2]):dirs[h.n][0]+' · '+fmtN(Math.abs(dirs[h.n][3]))+' files inside';
+  tip.style.display='block';tip.style.left=Math.min(innerWidth-330,e.clientX+14)+'px';tip.style.top=(e.clientY+14)+'px';}
+canvas.addEventListener('pointerleave',()=>tip.style.display='none');
+function click(e){const h=pick(e);if(!h){return;}if(h.f>=0)showFile(h.f);else showDir(h.n);}
+
+/* ---------- record panel ---------- */
+const rec=$('rec');
+function rows(a){const R=$('rRows');R.textContent='';a.forEach(([k,val])=>{const d=document.createElement('div');d.className='row';const s1=document.createElement('span');s1.className='dim';s1.textContent=k;const s2=document.createElement('span');s2.textContent=val;d.append(s1,s2);R.append(d);});}
+function listOf(title,items){const X=$('rExtra');const p=document.createElement('p');p.className='eyebrow';p.style.margin='8px 0 4px';p.textContent=title;const l=document.createElement('div');l.className='list';
+  items.forEach(([t,fn])=>{const b=document.createElement('button');b.type='button';b.textContent=t;b.onclick=fn;l.append(b);});X.append(p,l);}
+let selPos=null;const ring=$('ring');
+function setSel(seg){selLines.geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(seg),3));}
+function showFile(i){
+  const f=files[i],d=f[1];rec.classList.add('on');rec.classList.remove('wide');$('rExtra').textContent='';
+  $('rKind').textContent='Star · '+TYPES[ftype[i]].k;$('rName').textContent=f[0];$('rPath').textContent=pathOf(d)+'/';
+  rows([['Size',fmtB(f[2])],['Last changed',fmtD(f[3])],['Shares its folder with',fmtN(nf[d]-1)+' files']]);
+  const seg=[];const g=dupOf.get(i);
+  if(g){const others=g.filter(j=>j!==i);others.forEach(j=>seg.push(fpos[i*3],fpos[i*3+1],fpos[i*3+2],fpos[j*3],fpos[j*3+1],fpos[j*3+2]));
+    listOf(others.length+(others.length===1?' copy elsewhere':' copies elsewhere'),others.map(j=>[pathOf(files[j][1])+'/',()=>{flyTo(fpos[j*3],fpos[j*3+1],fpos[j*3+2],Math.max(8,own[files[j][1]]*4));showFile(j);}]));}
+  seg.push(fpos[i*3],fpos[i*3+1],fpos[i*3+2],dpos[d*3],dpos[d*3+1],dpos[d*3+2]);setSel(seg);selPos=[fpos[i*3],fpos[i*3+1],fpos[i*3+2]];selFile=i;preview(i);
+}
+function showDir(d){
+  rec.classList.add('on');rec.classList.remove('wide');$('rExtra').textContent='';setSel([]);selPos=null;selFile=-1;clearPrev();
+  $('rName').textContent=dirs[d][0];$('rPath').textContent=pathOf(dirs[d][1])+'/';
+  if(isNeb(d)){$('rKind').textContent='Nebula · bundle';const n=dirs[d][3];
+    rows([['Files inside',n<0?'more than '+fmtN(-n):fmtN(n)],['Size on disk',BKB[d]>0?fmtB(BKB[d]*1024):'not measured']]);
+    const p=document.createElement('p');p.className='dim';p.style.marginTop='8px';p.textContent=n<0?'Too large to count in full, so this is a lower bound. Its contents are drawn as one cloud.':'App, library or dependency bundle. Its contents are machine-managed, so they are drawn as one cloud instead of single stars.';$('rExtra').append(p);
+  }else{$('rKind').textContent='Constellation · folder report';rec.classList.add('media');
+    const inside=[];for(let i=0;i<NF;i++){let x=files[i][1];while(x>0&&x!==d)x=dirs[x][1];if(x===d)inside.push(i);}
+    const byT=TYPES.map(()=>0);let bytes=0,oldN=0,oldB=0,cpN=0,cpB=0;const yearAgo=tMax-365*86400;
+    for(const i of inside){const s=files[i][2];bytes+=s;byT[ftype[i]]+=s;if(files[i][3]<yearAgo){oldN++;oldB+=s;}if(dupOf.has(i)){cpN++;cpB+=s;}}
+    const nb=[];for(const n of nebIdx){let x=n;while(x>0&&x!==d)x=dirs[x][1];if(x===d)nb.push(n);}
+    const nbB=nb.reduce((s,n)=>s+(BKB[n]>0?BKB[n]*1024:0),0);
+    rows([['Files',fmtN(inside.length)+' · '+fmtB(bytes)],['Bundles inside',nb.length?fmtN(nb.length)+' · '+fmtB(nbB):'none'],['Total measured',fmtB(bytes+nbB)],['Not changed in over a year',fmtN(oldN)+' files · '+fmtB(oldB)],['Have a copy elsewhere',fmtN(cpN)+' files · '+fmtB(cpB)],['Folders directly inside',fmtN(kids[d].length)]]);
+    const X=$('rExtra');
+    if(bytes>0){const p=document.createElement('p');p.className='eyebrow sec';p.textContent='Space by type';const bar=document.createElement('div');bar.className='bar';
+      const ord=byT.map((b,t)=>[b,t]).filter(a=>a[0]>0).sort((a,b)=>b[0]-a[0]);
+      ord.forEach(([b,t])=>{const s=document.createElement('i');s.style.width=(b/bytes*100)+'%';s.style.background=TYPES[t].c;s.title=TYPES[t].k+' '+fmtB(b);bar.append(s);});
+      const lg=document.createElement('p');lg.className='dim';lg.textContent=ord.slice(0,4).map(([b,t])=>TYPES[t].k+' '+fmtB(b)).join(' · ');X.append(p,bar,lg);}
+    inside.sort((a,b)=>files[b][2]-files[a][2]);
+    if(inside.length)listOf('Largest files',inside.slice(0,8).map(i=>[fmtB(files[i][2])+' · '+files[i][0],()=>{flyTo(fpos[i*3],fpos[i*3+1],fpos[i*3+2],Math.max(8,own[files[i][1]]*4));showFile(i);}]));
+    nb.sort((a,b)=>(BKB[b]||0)-(BKB[a]||0));
+    if(nb.length)listOf('Largest bundles',nb.slice(0,6).map(n=>[(BKB[n]>0?fmtB(BKB[n]*1024):'not measured')+' · '+pathOf(n).slice(pathOf(d).length+1),()=>{flyTo(dpos[n*3],dpos[n*3+1],dpos[n*3+2],14);showDir(n);}]));
+    const pr=(pairsOf.get(d)||[]).slice().sort((a,b)=>b[1]-a[1]);
+    if(pr.length)listOf('Shares files with',pr.slice(0,8).map(([o,n])=>[fmtN(n)+' · '+pathOf(o),()=>{flyTo(dpos[o*3],dpos[o*3+1],dpos[o*3+2],Math.max(rs[o]*3.1,14));showDir(o);}]));
+  }
+}
+/* ---------- where the space goes ---------- */
+let sysTimer=0;
+function openPanel(kind,title,sub){clearInterval(sysTimer);rec.classList.add('on');rec.classList.remove('wide');setSel([]);selPos=null;selFile=-1;clearPrev();$('rExtra').textContent='';$('rRows').textContent='';$('rKind').textContent=kind;$('rName').textContent=title;$('rPath').textContent=sub;}
+function meter(parent,label,val,max,fn,grey){const m=document.createElement('div');m.className='meter';const a=document.createElement(fn?'button':'span');if(fn){a.type='button';a.onclick=fn;}else a.className='n';a.textContent=label;const e=document.createElement('em');e.textContent=fmtB(val);const u=document.createElement('u');if(grey)u.className='grey';u.style.width=Math.max(0.5,val/max*100)+'%';m.append(a,e,u);parent.append(m);}
+function sec(t){const p=document.createElement('p');p.className='eyebrow sec';p.textContent=t;$('rExtra').append(p);}
+function showSpace(){
+  const dk=extra&&extra.disk?extra.disk:null;
+  openPanel('Report · disk space','Where the space goes',dk?'Disk at the time of the scan: '+dk.usedGb+' GB used of '+dk.totalGb+' GB, '+dk.freeGb+' GB free':'');
+  rec.classList.add('media');const X=$('rExtra');
+  const fb=new Float64Array(ND);for(let i=0;i<NF;i++)fb[files[i][1]]+=files[i][2];for(const n of nebIdx)if(BKB[n]>0)fb[n]+=BKB[n]*1024;
+  for(let d=ND-1;d>0;d--)fb[dirs[d][1]]+=fb[d];
+  const libB=extra&&extra.libTotalKb?extra.libTotalKb*1024:0;const seen=fb[0]+libB+outsideB;
+  const regs=kids[0].map(d=>[fb[d],d]).filter(a=>a[0]>0).sort((a,b)=>b[0]-a[0]);
+  const items=[];for(const n of nebIdx)if(BKB[n]>0)items.push([BKB[n]*1024,pathOf(n),()=>{flyTo(dpos[n*3],dpos[n*3+1],dpos[n*3+2],14);showDir(n);}]);
+  for(let i=0;i<NF;i++)if(files[i][2]>2e8)items.push([files[i][2],pathOf(files[i][1])+'/'+files[i][0],()=>{flyTo(fpos[i*3],fpos[i*3+1],fpos[i*3+2],Math.max(8,own[files[i][1]]*4));showFile(i);}]);
+  if(extra&&extra.lib)extra.lib.forEach(([p,kb])=>{if(kb>2e5)items.push([kb*1024,'~/'+p,null]);});
+  items.sort((a,b)=>b[0]-a[0]);
+  if(dk){const used=dk.usedGb*1e9,miss=Math.max(0,used-seen);
+    rows([['Measured in this scan',fmtB(seen)],['Not accounted for',fmtB(miss)]]);
+    const p=document.createElement('p');p.className='dim';p.style.marginTop='6px';
+    const un=(extra.un||[]);const nm=u=>u[0].replace(SYSNAME+'/','');const blocked=un.filter(u=>u[1]==='blocked').map(nm);const big=un.filter(u=>u[1]!=='blocked').map(nm);
+    const few=a=>a.slice(0,5).join(', ')+(a.length>5?' and '+(a.length-5)+' more':'');
+    const why=[];if(blocked.length)why.push('parts of '+SYSNAME+' this scan may not read ('+few(blocked)+')');if(big.length)why.push('places too large to total in time ('+few(big)+')');
+    why.push(true?'local snapshots and system data':'everything outside the home folder, such as system files, apps, other accounts and local snapshots');
+    p.textContent=(true?'Measured: the home folder'+(SYSNAME?', '+SYSNAME:'')+' and the main system folders. ':'')+'The rest sits where this scan could not measure: '+why.join('; ')+'.'+(extra.snapshots?' This Mac has '+extra.snapshots+' local snapshots, which hold on to deleted files until macOS removes them.':'');X.append(p);}
+  sec('Biggest single items');const top=items.slice(0,12);top.forEach(([b,l,fn])=>meter(X,l,b,top[0][0],fn));
+  sec('By region of the home folder');regs.slice(0,10).forEach(([b,d])=>meter(X,dirs[d][0],b,regs[0][0],()=>{flyTo(dpos[d*3],dpos[d*3+1],dpos[d*3+2],Math.max(rs[d]*3.1,14));showDir(d);}));
+  if(libB)meter(X,SYSNAME+' (measured parts)',libB,Math.max(regs[0][0],libB),null,true);
+  if(extra&&extra.lib&&extra.lib.length){sec(SYSNAME+', biggest parts');const L=extra.lib.slice(0,14);L.forEach(([pth,kb])=>meter(X,'~/'+pth,KB(kb),KB(L[0][1]),null,true));}
+  if(extra&&extra.outside&&extra.outside.length){sec('Outside the home folder');const O=extra.outside;O.forEach(([pth,kb,done])=>meter(X,pth+(done?'':' (part)'),KB(kb),KB(O[0][1]),null,true));}
+}
+/* ---------- review copies ---------- */
+const PROJ_B=new Set(['node_modules','.git','.venv','venv','Pods','.next','site-packages','vendor']);
+const PROJ_F=new Set(['package.json','composer.json','requirements.txt','pubspec.yaml','Cargo.toml','go.mod','Podfile','pyproject.toml']);
+const inProj=new Uint8Array(ND);
+for(let d=1;d<ND;d++)if(isNeb(d)&&PROJ_B.has(dirs[d][0]))inProj[dirs[d][1]]=1;
+for(let i=0;i<NF;i++)if(PROJ_F.has(files[i][0]))inProj[files[i][1]]=1;
+inProj[0]=0;for(let d=1;d<ND;d++)if(!isNeb(d)&&inProj[dirs[d][1]])inProj[d]=1;
+const dupGroups=[];groups.forEach(g=>{if(g.length>1)dupGroups.push({g,code:g.some(i=>inProj[files[i][1]]),waste:files[g[0]][2]*(g.length-1)});});
+dupGroups.sort((a,b)=>b.waste-a.waste);
+const ticks=new Set(),gone=new Set();try{JSON.parse(localStorage.getItem('fsm-ticks-'+scanId)||'[]').forEach(i=>{if(dupOf.has(i))ticks.add(i);});}catch(e){}
+const saveTicks=()=>{try{localStorage.setItem('fsm-ticks-'+scanId,JSON.stringify([...ticks]));}catch(e){}};
+let showCode=false,shown=40;
+function showCopies(){
+  const list=dupGroups.filter(x=>showCode||!x.code);const all=list.reduce((s,x)=>s+x.waste,0);
+  openPanel('Review · probable copies','Copies you could remove',fmtN(list.length)+(list.length===1?' group':' groups')+(showCode?'':' outside code projects')+', '+fmtB(all)+' in spare copies');
+  rec.classList.add('wide');const X=$('rExtra');
+  const p=document.createElement('p');p.className='dim';p.textContent='Files in a group have the same name and size'+(Object.keys(SIG).length?', and matching samples from the start and end of their contents':'')+'. Tick the copies to remove; leave at least one unticked in each group. Nothing is deleted from this page.';X.append(p);
+  const a=document.createElement('div');a.className='acts';X.append(a);
+  const lb=document.createElement('label');lb.className='tog';lb.htmlFor='cCode';const cb=document.createElement('input');cb.type='checkbox';cb.id='cCode';cb.checked=showCode;cb.onchange=()=>{showCode=cb.checked;shown=40;showCopies();};lb.append(cb,' Include code projects ('+fmtN(dupGroups.filter(x=>x.code).length)+' groups; removing these can break a project)');a.append(lb);
+  const a2=document.createElement('div');a2.className='acts';X.append(a2);
+  btn('Tick spare copies in every group',()=>{list.forEach(x=>{const live=x.g.filter(i=>!gone.has(i));if(live.length<2)return;const keep=live.slice().sort((p,q)=>pathOf(files[p][1]).length-pathOf(files[q][1]).length)[0];live.forEach(i=>{if(i!==keep)ticks.add(i);else ticks.delete(i);});});saveTicks();showCopies();},a2);
+  btn('Clear ticks',()=>{ticks.clear();saveTicks();showCopies();},a2);
+  const foot=document.createElement('div');foot.className='sticky';const tot=document.createElement('span');
+  const upd=()=>{let b=0;ticks.forEach(i=>b+=files[i][2]);tot.textContent=fmtN(ticks.size)+' ticked · '+fmtB(b);};
+  list.slice(0,shown).forEach(x=>{const G=document.createElement('div');G.className='grp';const hd=document.createElement('h3');const n=document.createElement('span');n.textContent=files[x.g[0]][0];const s=document.createElement('span');s.className='num';s.textContent=x.g.length+' × '+fmtB(files[x.g[0]][2]);hd.append(n,s);G.append(hd);
+    if(x.code){const t=document.createElement('span');t.className='tag';t.style.alignSelf='flex-start';t.textContent='in a code project';G.append(t);}
+    x.g.forEach(i=>{const l=document.createElement('label');const c=document.createElement('input');c.type='checkbox';c.id='ck'+i;c.checked=ticks.has(i);c.disabled=gone.has(i);l.htmlFor=c.id;
+      c.onchange=()=>{if(c.checked){if(x.g.every(j=>j===i||ticks.has(j)||gone.has(j))){c.checked=false;return;}ticks.add(i);}else ticks.delete(i);saveTicks();upd();};
+      const b=document.createElement('button');b.type='button';b.textContent=pathOf(files[i][1])+'/ · '+fmtD(files[i][3])+(gone.has(i)?' · moved to the '+TRASH:'');b.onclick=e=>{e.preventDefault();flyTo(fpos[i*3],fpos[i*3+1],fpos[i*3+2],Math.max(8,own[files[i][1]]*4));selPos=[fpos[i*3],fpos[i*3+1],fpos[i*3+2]];};
+      l.append(c,b);G.append(l);});X.append(G);});
+  if(list.length>shown)btn('Show 40 more groups ('+fmtN(list.length-shown)+' left)',()=>{shown+=40;showCopies();},X);
+  foot.append(tot);
+  const MV='Move ticked copies to the '+TRASH;let armed=false;
+  btn(MV,async b=>{
+    if(!ticks.size){b.textContent='Nothing ticked yet';setTimeout(()=>b.textContent=MV,1600);return;}
+    if(!armed){armed=true;let by=0;ticks.forEach(i=>by+=files[i][2]);b.classList.add('warn');b.textContent='Confirm: move '+fmtN(ticks.size)+' files ('+fmtB(by)+')';
+      setTimeout(()=>{if(armed){armed=false;b.classList.remove('warn');b.textContent=MV;}},6000);return;}
+    armed=false;b.classList.remove('warn');b.disabled=true;b.textContent='Checking and moving…';
+    const items=[...ticks].map(i=>({i,rel:relPath(i),keep:dupOf.get(i).filter(j=>!ticks.has(j)&&!gone.has(j)).map(relPath)}));
+    let res;try{res=(await api('/api/trash',{items:items.map(({rel,keep})=>({rel,keep}))},900000)).results;}
+    catch(e){b.disabled=false;b.textContent=e.message;setTimeout(()=>b.textContent=MV,3000);return;}
+    let ok=0;const bad=[];res.forEach((r,k)=>{if(r.ok){ok++;ticks.delete(items[k].i);gone.add(items[k].i);}else bad.push(r);});saveTicks();
+    showCopies();const p=document.createElement('p');p.className='dim';p.style.margin='6px 0';
+    p.textContent='Moved '+fmtN(ok)+(ok===1?' copy':' copies')+' to the '+TRASH+'.'+(bad.length?' '+fmtN(bad.length)+' stayed: '+bad[0].error+(bad.length>1?' (and others).':''):'')+' Re-scan to update the map.';
+    const X2=$('rExtra');X2.insertBefore(p,X2.firstChild);
+  },foot);
+  btn('Copy list',async b=>{if(!ticks.size){b.textContent='Nothing ticked yet';setTimeout(()=>b.textContent='Copy list',1600);return;}
+    const txt=[...ticks].map(realPath).join('\n');try{await navigator.clipboard.writeText(txt);b.textContent='Copied';}catch(e){b.textContent='Copy was blocked';}setTimeout(()=>b.textContent='Copy list',1800);},foot);
+  const tip2=document.createElement('span');tip2.className='dim';tip2.textContent='Each ticked copy is compared byte for byte with a copy you keep before it moves. Nothing is deleted outright.';foot.append(tip2);
+  X.append(foot);upd();
+}
+/* ---------- disk and memory charts ---------- */
+function segBar(parent,parts,total,label){
+  const bar=document.createElement('div');bar.className='seg-bar';bar.setAttribute('role','img');
+  bar.setAttribute('aria-label',label+': '+parts.map(p=>p.n+' '+fmtB(p.v)+' ('+(p.v/total*100).toFixed(1)+'%)').join(', '));
+  const leg=document.createElement('div');leg.className='leg';
+  parts.forEach(p=>{if(p.v<=0)return;const pc=p.v/total*100;const d=document.createElement('div');d.style.flex=p.v+' 0 0';d.style.background=p.c;if(p.cls)d.className=p.cls;d.tabIndex=0;
+    const txt=p.n+' · '+fmtB(p.v)+' · '+pc.toFixed(1)+'%';d.setAttribute('aria-label',txt);if(pc>=7)d.textContent=pc.toFixed(0)+'%';
+    const show=e=>{tip.textContent=txt;tip.style.display='block';const r=d.getBoundingClientRect();tip.style.left=Math.min(innerWidth-330,(e&&e.clientX?e.clientX:r.left)+12)+'px';tip.style.top=(r.bottom+8)+'px';};
+    d.addEventListener('mousemove',show);d.addEventListener('focus',()=>show());d.addEventListener('mouseleave',()=>tip.style.display='none');d.addEventListener('blur',()=>tip.style.display='none');bar.append(d);
+    const i=document.createElement('i');if(p.cls==='free')i.className='free';else i.style.background=p.c;const s=document.createElement('span');s.textContent=p.n;const e=document.createElement('em');e.textContent=fmtB(p.v);const b=document.createElement('b');b.textContent=pc.toFixed(1)+'%';leg.append(i,s,e,b);});
+  parent.append(bar,leg);
+}
+const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function diskParts(dk){
+  let fb=0;for(let i=0;i<NF;i++)fb+=files[i][2];let bb=0;for(const n of nebIdx)if(BKB[n]>0)bb+=KB(BKB[n]);
+  const lb=extra&&extra.libTotalKb?KB(extra.libTotalKb):0;const parts=[{n:'Files in the home folder',s:'Home files',v:fb,c:cssv('--s1')},{n:'App and dependency bundles',s:'Bundles',v:bb,c:cssv('--s2')},{n:SYSNAME||'System folder',s:SYSNAME||'System',v:lb,c:cssv('--s3')},{n:'Apps and system folders outside home',s:'Apps and system',v:outsideB,c:cssv('--s4')}];
+  if(!dk)return {parts,total:fb+bb+lb+outsideB};
+  const used=dk.usedGb*1e9,tot=dk.totalGb*1e9,free=dk.freeGb*1e9;const known=fb+bb+lb+outsideB;
+  parts.push({n:'In use but not located by the scan',s:'Not located',v:Math.max(0,used-known),c:cssv('--s0'),cls:'grey'});
+  const other=tot-used-free;if(other>1e9)parts.push({n:'Other volumes on this disk',s:'Other volumes',v:other,c:'#4b5262',cls:'grey'});
+  parts.push({n:'Free',s:'Free',v:free,c:'transparent',cls:'free'});return {parts,total:tot};
+}
+function showSystem(){
+  const dk=extra&&extra.disk?extra.disk:null;
+  openPanel('Charts · this '+OSNAME,'Disk and memory',scanId?'Disk figures from the scan of '+new Date(scanId*1000).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'');
+  rec.classList.add('wide');const X=$('rExtra');
+  sec('Disk space');const hd=document.createElement('p');hd.className='hero';
+  if(dk){hd.textContent=dk.usedGb.toFixed(0)+' GB used';const sm=document.createElement('small');sm.textContent='of '+dk.totalGb.toFixed(0)+' GB · '+dk.freeGb.toFixed(0)+' GB free';hd.append(sm);}else hd.textContent='Measured parts only';
+  X.append(hd);const D=diskParts(dk);segBar(X,D.parts,D.total,'Disk space');
+  if(!dk){const n=document.createElement('p');n.className='dim';n.style.marginTop='6px';n.textContent='This scan could not read the disk total or free space, so the bar shows only what it measured.';X.append(n);}
+  sec('Memory (RAM)');const M=document.createElement('div');X.append(M);
+  const draw=async()=>{let s;try{s=await api('/api/system',null,8000);}catch(e){M.textContent='';const n=document.createElement('p');n.className='dim';n.textContent='StarMap is not answering: '+e.message+'.';M.append(n);clearInterval(sysTimer);return;}
+    if(!rec.classList.contains('on')||$('rName').textContent!=='Disk and memory'){clearInterval(sysTimer);return;}
+    M.textContent='';const m=s.memory;
+    if(m){const used=m.app+m.wired+m.compressed;const h2=document.createElement('p');h2.className='hero';h2.textContent=(used/1073741824).toFixed(1)+' GB used';const sm=document.createElement('small');sm.textContent='of '+(m.total/1073741824).toFixed(0)+' GB'+(m.swapUsed!=null?' · swap in use '+fmtB(m.swapUsed):'')+' · live';h2.append(sm);M.append(h2);
+      segBar(M,[{n:'App memory',v:m.app,c:cssv('--s1')},{n:'Wired (system)',v:m.wired,c:cssv('--s2')},{n:'Compressed',v:m.compressed,c:cssv('--s3')},{n:'Cached files',v:m.cached,c:cssv('--s4')},{n:'Free',v:m.free,c:'transparent',cls:'free'}],m.total,'Memory');}
+    else{const n=document.createElement('p');n.className='dim';n.textContent='Memory figures could not be read on this system.';M.append(n);}
+    if(s.apps&&s.apps.length){const p=document.createElement('p');p.className='eyebrow sec';p.textContent='Apps using the most memory';M.append(p);const g=document.createElement('div');g.className='pbar';const mx=s.apps[0][1];
+      s.apps.slice(0,8).forEach(([n,v])=>{const a=document.createElement('span');a.textContent=n;a.title=n;const u=document.createElement('u');u.style.width=Math.max(1,v/mx*100)+'%';const e=document.createElement('em');e.textContent=fmtB(v);const w=document.createElement('div');w.append(u);g.append(a,w,e);});M.append(g);}
+  };
+  draw();sysTimer=setInterval(draw,4000);
+}
+/* ---------- permanent disk and memory readout, beside the chart key ---------- */
+function thinBar(parent,parts,total){
+  const bar=document.createElement('div');bar.className='thin';const keys=document.createElement('div');keys.className='keys';
+  parts.forEach(p=>{if(p.v<=0)return;const d=document.createElement('div');d.style.flex=p.v+' 0 0';d.style.background=p.c;if(p.cls==='free')d.className='free';
+    const txt=p.n+' · '+fmtB(p.v)+' · '+(p.v/total*100).toFixed(1)+'%';
+    d.addEventListener('mousemove',e=>{tip.textContent=txt;tip.style.display='block';tip.style.left=Math.min(innerWidth-330,e.clientX+12)+'px';tip.style.top=(e.clientY+14)+'px';});d.addEventListener('mouseleave',()=>tip.style.display='none');bar.append(d);
+    const k=document.createElement('span');const i=document.createElement('i');if(p.cls==='free')i.className='free';else i.style.background=p.c;const e=document.createElement('em');e.textContent=fmtB(p.v);k.append(i,p.s||p.n,e);keys.append(k);});
+  parent.append(bar,keys);
+}
+let liveSys=null,netPeak=0;const mins=new Set();try{JSON.parse(localStorage.getItem('fsm-min')||'[]').forEach(k=>mins.add(k));}catch(e){}
+const ICONS={
+ disk:'<path d="M4 14h16v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><path d="M4 14 6.6 5.7A1 1 0 0 1 7.6 5h8.8a1 1 0 0 1 1 .7L20 14"/><circle cx="16.8" cy="17" r=".9" fill="currentColor" stroke="none"/><path d="M7 17h5"/>',
+ mem:'<rect x="2.5" y="7" width="19" height="9" rx="1"/><rect x="5.5" y="9.5" width="3" height="4"/><rect x="10.5" y="9.5" width="3" height="4"/><rect x="15.5" y="9.5" width="3" height="4"/><path d="M6 16v3M9 16v3M12 16v3M15 16v3M18 16v3"/>',
+ net:'<path d="M2.5 9.5a14 14 0 0 1 19 0"/><path d="M5.8 13a9.2 9.2 0 0 1 12.4 0"/><path d="M9.1 16.4a4.4 4.4 0 0 1 5.8 0"/><circle cx="12" cy="19.6" r="1.1" fill="currentColor" stroke="none"/>'};
+function block(parent,key,name,big,small){
+  const B=document.createElement('div');B.className='blk'+(mins.has(key)?' min':'');const top=document.createElement('div');top.className='top';
+  const l=document.createElement('div');l.className='line';const b=document.createElement('b');b.textContent=big;const s=document.createElement('span');s.textContent=small;l.append(b,s);
+  const m=document.createElement('button');m.type='button';m.className='mini';const on=mins.has(key);m.textContent=on?'+':'–';m.title=(on?'Show the ':'Hide the ')+name+' details';m.setAttribute('aria-label',m.title);m.setAttribute('aria-expanded',String(!on));
+  m.onclick=()=>{if(mins.has(key))mins.delete(key);else mins.add(key);try{localStorage.setItem('fsm-min',JSON.stringify([...mins]));}catch(e){}drawSys();};
+  top.append(l,m);const bars=document.createElement('div');bars.className='bars';
+  const ic=document.createElementNS('http://www.w3.org/2000/svg','svg');ic.setAttribute('viewBox','0 0 24 24');ic.setAttribute('class','ico');ic.setAttribute('fill','none');ic.setAttribute('stroke','currentColor');ic.setAttribute('stroke-width','1.6');ic.setAttribute('stroke-linecap','round');ic.setAttribute('stroke-linejoin','round');ic.setAttribute('role','img');ic.setAttribute('aria-label',name);ic.innerHTML=ICONS[key]+'<title>'+name.charAt(0).toUpperCase()+name.slice(1)+'</title>';
+  B.append(ic,top,bars);parent.append(B);
+  return {bars,keys:k=>{B.append(k);}};
+}
+function thinInto(blk,parts,total){const tmp=document.createElement('div');thinBar(tmp,parts,total);blk.bars.append(tmp.firstChild);blk.keys(tmp.lastChild);}
+function track(blk,name,v,max,color){const t=document.createElement('div');t.className='track';const i=document.createElement('i');i.style.background=color;i.style.width=(max>0?Math.min(100,v/max*100):0)+'%';if(!(v>0))i.style.display='none';t.append(i);
+  const txt=name+' · '+fmtB(v||0)+'/s'+(max>0?' · bar is full at '+fmtB(max)+'/s':'');t.addEventListener('mousemove',e=>{tip.textContent=txt;tip.style.display='block';tip.style.left=Math.min(innerWidth-330,e.clientX+12)+'px';tip.style.top=(e.clientY+14)+'px';});t.addEventListener('mouseleave',()=>tip.style.display='none');blk.bars.append(t);}
+function placeNet(){const N=$('net');if(innerWidth<=760)return;const open=rec.classList.contains('on');const r=open?rec.getBoundingClientRect().width+32:16;const room=innerWidth-r-300>690;N.style.right=r+'px';N.style.visibility=room?'visible':'hidden';}
+function drawSys(){
+  const S=$('sys');S.textContent='';
+  const dk=liveSys&&liveSys.disk?liveSys.disk:(extra&&extra.disk?extra.disk:null);
+  const D=diskParts(dk);
+  const bd=block(S,'disk','disk',dk?'Disk '+dk.usedGb.toFixed(0)+' GB used':'Disk',dk?'of '+dk.totalGb.toFixed(0)+' GB · '+dk.freeGb.toFixed(0)+' GB free'+(liveSys?' · live':''):'total not read by this scan');
+  thinInto(bd,D.parts,D.total);
+  const m=liveSys?liveSys.memory:null;
+  if(m){const used=m.app+m.wired+m.compressed;const bm=block(S,'mem','memory','Memory '+(used/1073741824).toFixed(1)+' GB used','of '+(m.total/1073741824).toFixed(0)+' GB'+(m.swapUsed!=null?' · swap '+fmtB(m.swapUsed):'')+' · live');
+    thinInto(bm,[{n:'App memory',s:'Apps',v:m.app,c:cssv('--s1')},{n:'Wired (system)',s:'Wired',v:m.wired,c:cssv('--s2')},{n:'Compressed',s:'Compressed',v:m.compressed,c:cssv('--s3')},{n:'Cached files',s:'Cached',v:m.cached,c:cssv('--s4')},{n:'Free',s:'Free',v:m.free,c:'transparent',cls:'free'}],m.total);
+    if(liveSys.apps&&liveSys.apps.length){const k=document.createElement('div');k.className='keys';liveSys.apps.slice(0,3).forEach(([n,v])=>{const s=document.createElement('span');const e=document.createElement('em');e.textContent=fmtB(v);s.append(n.length>18?n.slice(0,17)+'…':n,e);k.append(s);});bm.keys(k);}
+  }else{const bm=block(S,'mem','memory','Memory',liveSys?'not readable on this system':'waiting for StarMap…');const t=document.createElement('div');t.className='track';bm.bars.append(t);}
+  const N=$('net');N.textContent='';const n=liveSys?liveSys.network:null;
+  if(n){const dn=n.down||0,up=n.up||0;netPeak=Math.max(netPeak*0.985,dn,up,50000);
+    const bn=block(N,'net','network','Network ↓ '+fmtB(dn)+'/s','↑ '+fmtB(up)+'/s · '+n.iface+' · live');
+    track(bn,'Download',dn,netPeak,cssv('--s1'));track(bn,'Upload',up,netPeak,cssv('--s2'));
+    const k=document.createElement('div');k.className='keys';[['Download',cssv('--s1'),fmtB(dn)+'/s'],['Upload',cssv('--s2'),fmtB(up)+'/s']].forEach(([nm,c,v])=>{const s=document.createElement('span');const i=document.createElement('i');i.style.background=c;const e=document.createElement('em');e.textContent=v;s.append(i,nm,e);k.append(s);});
+    [['Received since startup',fmtB(n.rx)],['Sent',fmtB(n.tx)],['Bars full at',fmtB(netPeak)+'/s']].forEach(([nm,v])=>{const s=document.createElement('span');const e=document.createElement('em');e.textContent=v;s.append(nm,e);k.append(s);});bn.keys(k);
+  }else{const bn=block(N,'net','network','Network',liveSys?'not readable on this system':'waiting for StarMap…');const t=document.createElement('div');t.className='track';bn.bars.append(t);const t2=document.createElement('div');t2.className='track';bn.bars.append(t2);}
+  placeNet();
+}
+new MutationObserver(placeNet).observe($('rec'),{attributes:true,attributeFilter:['class']});addEventListener('resize',placeNet);
+async function pollSys(){try{liveSys=await api('/api/system',null,8000);}catch(e){liveSys=null;}drawSys();}
+$('bSys').onclick=showSystem;$('bSpace').onclick=showSpace;$('bCopies').onclick=showCopies;
+$('close').onclick=()=>{clearInterval(sysTimer);document.querySelectorAll('.rchip').forEach(c=>c.setAttribute('aria-pressed','false'));rec.classList.remove('on','wide');setSel([]);selPos=null;selFile=-1;clearPrev();};
+
+/* ---------- previews, served by StarMap from this computer ---------- */
+let prevTok=0,selFile=-1;
+const relPath=i=>{const d=pathOf(files[i][1]);return (d==='~'?'':d.slice(2)+'/')+files[i][0];};
+const nativePath=r=>INFO.home+(r?INFO.sep+r.split('/').join(INFO.sep):'');
+const realPath=i=>nativePath(relPath(i));
+const fileURL=i=>'/file?rel='+encodeURIComponent(relPath(i));
+const extOf=n=>{const p=n.lastIndexOf('.');return p>0?n.slice(p+1).toLowerCase():'';};
+const KIND={};'mp3 wav m4a aac ogg opus flac aiff aif'.split(' ').forEach(x=>KIND[x]='audio');'mp4 webm mov m4v'.split(' ').forEach(x=>KIND[x]='video');
+'png jpg jpeg webp gif svg ico bmp'.split(' ').forEach(x=>KIND[x]='image');KIND.pdf='pdf';KIND.docx='docx';
+'md txt json csv xml yaml yml log sql conf sh bat ps1 html htm css js ts tsx jsx cjs mjs py php rb go rs java c h cpp cs swift kt vue scss toml ini plist strings service example out gitignore'.split(' ').forEach(x=>KIND[x]='text');
+function clearPrev(){rec.classList.remove('media');prevTok++;$('rPrev').textContent='';$('rActs').textContent='';}
+const libs={};function lib(u){return libs[u]||(libs[u]=new Promise((ok,no)=>{const s=document.createElement('script');s.src=u;s.onload=ok;s.onerror=()=>{delete libs[u];no(new Error('a part of StarMap did not load'));};document.head.append(s);}));}
+function note(t){const p=document.createElement('p');p.className='dim';p.textContent=t;$('rPrev').append(p);return p;}
+function btn(t,fn,where){const b=document.createElement('button');b.type='button';b.className='btn';b.textContent=t;b.onclick=()=>fn(b);(where||$('rActs')).append(b);return b;}
+async function preview(i){
+  clearPrev();const tok=prevTok;const P=$('rPrev');const f0=files[i];const kind=KIND[extOf(f0[0])];
+  btn('Copy full path',async b=>{try{await navigator.clipboard.writeText(realPath(i));b.textContent='Copied';}catch(e){b.textContent='Copy was blocked';}setTimeout(()=>b.textContent='Copy full path',1600);});
+  const act=(p,b,l)=>api(p,{rel:relPath(i)}).then(()=>{b.textContent='Done';}).catch(e=>{b.textContent=e&&e.message&&e.message.length<70?e.message:'StarMap did not answer';}).finally(()=>setTimeout(()=>b.textContent=l,2600));
+  btn('Open file',b=>act('/api/open',b,'Open file'));btn('Show in '+FILEMGR,b=>act('/api/reveal',b,'Show in '+FILEMGR));
+  if(!kind){note('No preview for this type of file. Use Open file.');return;}
+  if(kind==='video'||kind==='image'||kind==='pdf'||kind==='docx')rec.classList.add('media');
+  btn('Larger view',b=>{const w=rec.classList.toggle('wide');b.textContent=w?'Smaller view':'Larger view';});
+  const url=fileURL(i);
+  if(kind!=='docx'){const a=document.createElement('a');a.className='btn';a.href=url;a.target='_blank';a.rel='noopener';a.textContent='Open in a new tab';$('rActs').append(a);}
+  if(kind==='pdf'||kind==='text'){rec.classList.add('media');const fr=document.createElement('iframe');fr.src=url;fr.title=f0[0];P.append(fr);return;}
+  if(kind==='docx'){
+    if(f0[2]>25e6){note('This document is too large to preview here. Use Open file.');return;}
+    const wait=note('Opening document…');
+    try{await lib('/vendor/mammoth.browser.min.js');const r0=await fetch(url,{credentials:'same-origin'});if(!r0.ok)throw new Error('the file could not be read; it may have moved since the scan');
+      const r=await mammoth.convertToHtml({arrayBuffer:await r0.arrayBuffer()});if(tok!==prevTok)return;
+      const doc=new DOMParser().parseFromString(r.value,'text/html');doc.querySelectorAll('script,style,iframe,object,embed,link,meta,base,form').forEach(n=>n.remove());
+      doc.querySelectorAll('*').forEach(n=>[...n.attributes].forEach(a=>{if(/^on/i.test(a.name)||(/^(href|src|xlink:href|action|formaction)$/i.test(a.name)&&!/^(data:image\/|#|https?:)/i.test(a.value.trim())))n.removeAttribute(a.name);}));
+      const d=document.createElement('div');d.className='doc';d.append(...doc.body.childNodes);wait.remove();P.append(d);}
+    catch(e){if(tok===prevTok){wait.remove();note('The preview could not be made: '+(e&&e.message?e.message:'unknown error')+'.');}}
+    return;}
+  const el=document.createElement(kind==='image'?'img':kind);el.src=url;
+  if(kind!=='image'){el.controls=true;el.preload='metadata';el.playsInline=true;}else el.alt=f0[0];
+  el.onerror=()=>{if(tok===prevTok)note(kind==='image'?'This image could not be opened. It may have moved since the scan.':'This file could not be played. It may have moved since the scan, or this browser cannot play the format.');};
+  P.append(el);
+}
+$('conn').textContent='Files open and play straight from this '+OSNAME+'. Nothing is uploaded.';
+
+/* ---------- recommendations, worked out from the scan ---------- */
+const dirAt=p=>{for(let d=1;d<ND;d++)if(dirs[d][0]===p.slice(p.lastIndexOf('/')+1)&&pathOf(d)===p)return d;return -1;};
+const KB=n=>n*1024;const libKb=p=>{const r=extra&&extra.lib?extra.lib.find(x=>x[0]===p):null;return r?KB(r[1]):0;};
+const bundleB=p=>{const d=dirAt(p);return d>0&&BKB[d]>0?KB(BKB[d]):0;};
+const filesIn=p=>{const d=dirAt(p);let s=0;if(d>0)for(let i=0;i<NF;i++)if(files[i][1]===d)s+=files[i][2];return s;};
+const fileB=(p,n)=>{const d=dirAt(p);if(d>0)for(let i=0;i<NF;i++)if(files[i][1]===d&&files[i][0]===n)return files[i][2];return 0;};
+const sysKb=p=>libKb(SYSNAME+'/'+p);
+const partB=p=>extra&&extra.parts&&(p in extra.parts)?KB(extra.parts[p]):0;
+const qpath=s=>isWin?"'"+s.replace(/'/g,"''")+"'":"'"+s.replace(/'/g,"'\\''")+"'";
+const prevTotal=NF+nebIdx.reduce((s,d)=>s+Math.abs(dirs[d][3]),0);prevTotalAll=prevTotal;
+const archDirs=(()=>{const by=new Map();for(let i=0;i<NF;i++)if(ftype[i]===6){const d=files[i][1];const v=by.get(d)||{n:0,b:0};v.n++;v.b+=files[i][2];by.set(d,v);}
+  return [...by].filter(([d,v])=>v.n>=5&&v.b>1e9).sort((a,b)=>b[1].b-a[1].b);})();
+const pkg=(()=>{const L=[];
+  if(isMac){const v=sysKb('Caches/Homebrew');if(v)L.push(['Homebrew',v,'brew cleanup --prune=all']);}
+  const npm=isWin?sysKb('Local/npm-cache'):partB('~/.npm/_cacache');if(npm)L.push(['npm',npm,'npm cache clean --force']);
+  const pip=isMac?sysKb('Caches/pip'):isWin?sysKb('Local/pip'):partB('~/.cache/pip');if(pip)L.push(['pip',pip,'pip cache purge']);
+  const yarn=isMac?sysKb('Caches/Yarn'):isWin?sysKb('Local/Yarn'):partB('~/.cache/yarn');if(yarn)L.push(['Yarn',yarn,'yarn cache clean']);
+  return L;})();
+const RECS=extra?[
+ ...(extra.disk?[{t:'Track down the remaining space',risk:'look',gain:0,
+   why:'This is the part of the '+extra.disk.usedGb+' GB in use that is left after measuring the home folder'+(SYSNAME?', '+SYSNAME:'')+' and the main system folders. '+
+     (isMac?'The usual holders are local Time Machine snapshots'+(extra.snapshots?' (this Mac has '+extra.snapshots+' right now)':'')+', system data, and folders this account may not read.'
+      :isWin?'The usual holders are restore points, the Windows component store, other user accounts and folders this account may not read.'
+      :'The usual holders are system files, logs, containers and folders this account may not read.'),
+   steps:isMac?['Open System Settings, then General, then Storage. It shows what macOS counts as Applications, Documents, Developer and System Data.','If System Data is very large, local Time Machine snapshots are a common cause. The command lists them; macOS removes them by itself as space runs low.']
+     :isWin?['Open Settings, then System, then Storage. It breaks the drive down into apps, temporary files, system and more.','Under Cleanup recommendations, Windows can safely remove update leftovers and old restore points. The command opens that page.']
+     :['Run the command to list the biggest folders on the drive, one level at a time. Add sudo in front to include folders this account may not read.'],
+   cmd:isMac?'tmutil listlocalsnapshots /':isWin?'Start-Process ms-settings:storagesense':'du -xh -d 1 / 2>/dev/null | sort -h | tail -15'}]:[]),
+ ...(()=>{let g=-1;for(const n of nebIdx)if(dirs[n][0]==='.git'&&BKB[n]>2e6&&(g<0||BKB[n]>BKB[g]))g=n;if(g<0)return [];
+   const proj=nativePath(pathOf(dirs[g][1]).slice(2));
+   return [{t:'Trim the '+dirs[dirs[g][1]][0]+' history',risk:'check',gain:KB(BKB[g])*0.9,show:[pathOf(g)],
+   why:'The version history of this project is '+fmtB(KB(BKB[g]))+', far more than a code history normally needs. That usually means a few very large files were committed at some point, or temporary packs were left behind by interrupted git operations.',
+   steps:['Do not delete the .git folder by hand. That would discard the project history.','Run the command to list the ten largest objects in the history and which files they were.','If those files are not needed in the history, removing them frees most of this. It rewrites history, so push or back up first.'],
+   cmd:isWin?'Set-Location '+qpath(proj)+"; git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | Sort-Object { [long]($_ -split ' ')[1] } | Select-Object -Last 10"
+     :'cd '+qpath(proj)+" && git rev-list --objects --all | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' | sort -k2 -n | tail -10"}];})(),
+ ...(isMac&&sysKb('Developer/CoreSimulator/Devices')>2e9?[{t:'Remove unused iOS simulators',risk:'check',gain:sysKb('Developer/CoreSimulator/Devices'),
+   why:'Xcode keeps a full disk image for every simulator device it has created. Together they take this much.',
+   steps:['The command removes simulators that the installed Xcode can no longer run. That is always safe.','To go further, open Xcode, then Window, then Devices and Simulators, and delete the simulators you do not use.'],cmd:'xcrun simctl delete unavailable'}]:[]),
+ ...(isMac?[{t:'Clear Xcode device support',risk:'safe',gain:sysKb('Developer/Xcode/iOS DeviceSupport')+sysKb('Developer/Xcode/DerivedData'),
+   why:'Xcode keeps debug symbols for every iOS version it has connected to, plus build leftovers. Both are rebuilt when needed.',
+   steps:['Quit Xcode.','Run the commands. Xcode downloads symbols again the next time a device is connected, which takes a few minutes.'],
+   cmd:'rm -rf ~/Library/Developer/Xcode/iOS\\ DeviceSupport/*\nrm -rf ~/Library/Developer/Xcode/DerivedData/*'}]:[]),
+ ...(()=>{const big=[];for(let i=0;i<NF;i++)if(ftype[i]===6&&files[i][2]>1.5e9)big.push(i);if(!big.length)return [];big.sort((a,b)=>files[b][2]-files[a][2]);const top=big.slice(0,4);
+   return [{t:'Move large archives off this '+OSNAME,risk:'check',gain:top.reduce((s,i)=>s+files[i][2],0),show:[...new Set(top.map(i=>pathOf(files[i][1])))].slice(0,3),
+   why:'A few single archive files take this much: '+top.map(i=>files[i][0]+' ('+fmtB(files[i][2])+')').join(', ')+'.',
+   steps:['Decide which of these you still need on this '+OSNAME+'.','Copy the ones worth keeping to an external drive or cloud storage, check the copy opens, then remove the original.']}];})(),
+ ...(archDirs.length?[{t:'Thin out old archives',risk:'check',gain:archDirs[0][1].b,show:archDirs.slice(0,3).map(a=>pathOf(a[0])),
+   why:'The folder '+pathOf(archDirs[0][0])+' holds '+archDirs[0][1].n+' archive files totalling '+fmtB(archDirs[0][1].b)+'. Old build snapshots and repeated backups are rarely needed once a newer one exists.',
+   steps:['Open the folder report to see the archives by size and date.','Keep the latest and any you might roll back to; remove the rest.']}]:[]),
+ ...(pkg.length?[{t:'Clear package caches',risk:'safe',gain:pkg.reduce((s,x)=>s+x[1],0),
+   why:pkg.map(x=>x[0]).join(', ')+' keep every package they have downloaded. Nothing installed depends on these copies; they download again when needed.',
+   steps:['Run the commands in '+SHELL+'.'],cmd:pkg.map(x=>x[2]).join('\n')}]:[]),
+ ...(isMac?(()=>{const skip=/^Library\/Caches\/(Homebrew|pip|Yarn)$/;const L=(extra.lib||[]).filter(x=>x[0].startsWith('Library/Caches/')&&!skip.test(x[0])&&x[1]>5e5).slice(0,4);if(!L.length)return [];
+   return [{t:'Clear large app caches',risk:'safe',gain:L.reduce((s,x)=>s+KB(x[1]),0),
+   why:'These apps keep this much in the caches folder: '+L.map(x=>x[0].slice(15)+' ('+fmtB(KB(x[1]))+')').join(', ')+'. Apps rebuild what they need.',
+   steps:['Quit those apps first.','Run the commands.'],cmd:L.map(x=>'rm -rf '+qpath(nativePath(x[0]))).join('\n')}];})():[]),
+ ...(isWin&&sysKb('Local/Temp')>2e8?[{t:'Clear temporary files',risk:'safe',gain:sysKb('Local/Temp'),
+   why:'Apps leave installers, logs and scratch files in the temporary folder and rarely clean up after themselves.',
+   steps:['Close other apps first. Files still in use are skipped.','Run the command in PowerShell.'],cmd:'Remove-Item -Recurse -Force "$env:TEMP\\*" -ErrorAction SilentlyContinue'}]:[]),
+ ...(isLinux&&bundleB('~/.cache')-partB('~/.cache/pip')-partB('~/.cache/yarn')>5e8?[{t:'Clear the cache folder',risk:'check',gain:bundleB('~/.cache')-partB('~/.cache/pip')-partB('~/.cache/yarn'),
+   why:'Apps keep thumbnails, downloads and other rebuildable data in ~/.cache.',
+   steps:['Close other apps first.','Run the command. Apps rebuild what they need, so the first start of some may be slower.'],cmd:'rm -rf ~/.cache/*'}]:[]),
+ {t:'Remove spare copies',risk:'check',gain:dupGroups.filter(x=>!x.code).reduce((s,x)=>s+x.waste,0),open:()=>showCopies(),
+  why:'These files have a copy with the same name, size and matching content samples in another folder, outside any code project.',
+  steps:['Open the review and tick the copies you do not need.','StarMap compares each ticked copy byte for byte with one you keep, then moves it to the '+TRASH+'.']}
+]:[];
+const outsideB=extra&&extra.outside?extra.outside.reduce((s,x)=>s+KB(x[1]),0):0;
+const RISK={safe:'Safe to clear',check:'Check first',look:'Look here first'};
+function showRec(r,chip){
+  openPanel('Recommendation',r.t,'');rec.classList.add('media');
+  document.querySelectorAll('.rchip').forEach(c=>c.setAttribute('aria-pressed',c===chip));
+  const X=$('rExtra');const pl=document.createElement('span');pl.className='pill';const dot=document.createElement('i');dot.className=r.risk;pl.append(dot,RISK[r.risk]);X.append(pl);
+  rows([[r.risk==='look'?'Not yet measured':'Could free',r.risk==='look'?fmtB(unseen):'up to '+fmtB(r.gain)]]);
+  const p=document.createElement('p');p.style.marginTop='10px';p.textContent=r.why;X.append(p);
+  sec('What to do');const ol=document.createElement('ol');r.steps.forEach(s=>{const li=document.createElement('li');li.textContent=s;ol.append(li);});X.append(ol);
+  if(r.cmd){const pre=document.createElement('pre');pre.className='cmd';pre.textContent=r.cmd;X.append(pre);}
+  const a=document.createElement('div');a.className='acts';X.append(a);
+  if(r.cmd)btn('Copy commands',async b=>{try{await navigator.clipboard.writeText(r.cmd);b.textContent='Copied';}catch(e){b.textContent='Copy was blocked';}setTimeout(()=>b.textContent='Copy commands',1600);},a);
+  if(r.open)btn('Open the review',r.open,a);
+  (r.show||[]).forEach(pth=>{const d=dirAt(pth);if(d>0)btn('Show '+(pathOf(d).length>40?'…'+pathOf(d).slice(-38):pathOf(d))+' on the map',()=>{flyTo(dpos[d*3],dpos[d*3+1],dpos[d*3+2],Math.max(rs[d]*3.1,14));},a);});
+  if(r.cmd){const n=document.createElement('p');n.className='dim';n.style.marginTop='8px';n.textContent='Commands run in '+SHELL+' on this '+OSNAME+'. This page changes nothing by itself.';X.append(n);}
+}
+let unseen=0;
+(function(){
+  const bar=$('recs');
+  let seen=0;for(let i=0;i<NF;i++)seen+=files[i][2];for(const n of nebIdx)if(BKB[n]>0)seen+=KB(BKB[n]);seen+=extra&&extra.libTotalKb?KB(extra.libTotalKb):0;seen+=outsideB;
+  const dk=extra&&extra.disk?extra.disk:null;
+  unseen=dk?Math.max(0,dk.usedGb*1e9-seen):0;RECS.forEach(r=>{if(r.risk==='look')r.gain=unseen;});
+  const list=RECS.filter(r=>r.gain>(r.risk==='look'?15e9:2e8)).sort((a,b)=>(b.risk==='look')-(a.risk==='look')||b.gain-a.gain);
+  const total=list.filter(r=>r.risk!=='look').reduce((s,r)=>s+r.gain,0);
+  const when=scanId?new Date(scanId*1000).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+  const lead=document.createElement('div');lead.className='lead';const b=document.createElement('b');
+  if(dk){const pc=dk.usedGb/dk.totalGb*100;b.textContent='Disk '+pc.toFixed(1)+'% full';b.className=pc>=95?'':pc>=85?'warn':'fine';}else{b.textContent='File scan';b.className='fine';}
+  const s=document.createElement('span');s.textContent=(when?'Scanned '+when+' · ':'')+(total>0?'up to '+fmtB(total)+' could be freed':'nothing large left to clear');lead.append(b,s);bar.append(lead);
+  const rb=document.createElement('button');rb.type='button';rb.className='btn';rb.id='bScan';rb.textContent='Re-scan';rb.onclick=()=>runScanUI(prevTotal,false);bar.append(rb);
+  list.forEach(r=>{const c=document.createElement('button');c.type='button';c.className='rchip';c.setAttribute('aria-pressed','false');const d=document.createElement('i');d.className=r.risk;d.title=RISK[r.risk];const e=document.createElement('em');e.textContent=r.risk==='look'?fmtB(r.gain)+' ?':fmtB(r.gain);const t=document.createElement('span');t.textContent=r.t;c.append(d,e,t);c.onclick=()=>showRec(r,c);bar.append(c);});
+})();
+
+/* ---------- controls ---------- */
+$('mode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;mode=b.dataset.m;[...$('mode').children].forEach(x=>x.setAttribute('aria-pressed',x===b));paint();});
+$('tLines').onchange=e=>treeLines.visible=e.target.checked;
+$('tDup').onchange=e=>dupLines.visible=e.target.checked;
+$('tNeb').onchange=e=>nebs.visible=e.target.checked;
+$('tSpin').onchange=e=>{spin=e.target.checked;touched=false;};
+$('home').onclick=()=>{flyTo(cx,cy,cz,ext*2.15);touched=false;};
+addEventListener('keydown',e=>{if(e.key==='Escape'){if($('scan').classList.contains('on')){if(!scanBusy)$('scan').classList.remove('on');}else $('close').click();}});
+$('fold').onclick=()=>$('key').classList.toggle('folded');
+if(innerWidth<=760)$('key').classList.add('folded');
+let qt;$('q').addEventListener('input',e=>{clearTimeout(qt);qt=setTimeout(()=>{query=e.target.value.trim().toLowerCase();paint();
+  const H=$('hits');H.textContent='';if(!query){H.hidden=true;return;}
+  const hit=[];for(let i=0;i<NF&&hit.length<400;i++)if(files[i][0].toLowerCase().includes(query))hit.push(i);
+  let total=0;for(let i=0;i<NF;i++)if(matches(i))total++;
+  H.hidden=false;const p=document.createElement('p');p.className='dim';p.textContent=total?fmtN(total)+' stars lit':'No file or folder has that in its name.';H.append(p);
+  hit.sort((a,b)=>files[b][3]-files[a][3]).slice(0,12).forEach(i=>{const b=document.createElement('button');b.type='button';b.textContent=files[i][0];b.onclick=()=>{flyTo(fpos[i*3],fpos[i*3+1],fpos[i*3+2],Math.max(8,own[files[i][1]]*4));showFile(i);};H.append(b);});
+},160);});
+
+/* ---------- summary ---------- */
+let nebFiles=0,lower=false;nebIdx.forEach(d=>{nebFiles+=Math.abs(dirs[d][3]);if(dirs[d][3]<0)lower=true;});
+const fig=(n,l)=>{const d=document.createElement('div');const b=document.createElement('b');b.textContent=n;const s=document.createElement('span');s.textContent=l;d.append(b,s);$('figs').append(d);};
+fig(fmtN(NF),'files as stars');fig(fmtN(ND-1-nebIdx.length),'folders');fig(Math.round(nebFiles/1000)+'k'+(lower?'+':''),'files in nebulae');
+$('stats').textContent='A folder is a cluster; its subfolders nest inside it. Bigger files burn brighter. Gold arcs join folders that hold copies of the same files.';
+$('dupN').textContent=fmtN(dupFiles);
+if(extra&&extra.capped)$('stats').textContent+=' This home folder has so many files that, past the first 250,000, folders are drawn as nebulae to keep the map fast.';
+paint();msg.remove();
+
+/* ---------- loop ---------- */
+drawSys();pollSys();setInterval(pollSys,3000);
+const t0=performance.now();
+function frame(){
+  if(flying){tgt.lerp(tgtTo,0.07);dist+=(distTo-dist)*0.07;if(tgt.distanceTo(tgtTo)<0.02&&Math.abs(dist-distTo)<0.02)flying=false;}
+  if(spin&&!touched&&!ptrs.size)th+=0.0009;
+  placeCam();cam.updateMatrixWorld();
+  const u=stars.material.uniforms,un=nebs.material.uniforms;
+  u.uTime.value=reduceM?0:(performance.now()-t0)/1000;u.uNear.value=un.uNear.value=dist*0.75;u.uFar.value=un.uFar.value=dist*1.9+ext*0.6;
+  u.uGain.value=0.72+0.28*Math.min(1,Math.max(0,1-(dist/ext-0.25)/1.6));un.uGain.value=0.8;
+  for(const g of glows.children){const q=cam.position.distanceTo(g.position)/g.scale.x;g.material.opacity=0.16*Math.min(1,Math.max(0,(q-0.55)/0.6));}
+  renderer.render(scene,cam);
+  const w=canvas.clientWidth,h=canvas.clientHeight;
+  layoutLabels(w,h);
+  if(selPos){v.set(selPos[0],selPos[1],selPos[2]).project(cam);if(v.z<1&&v.z>-1){ring.style.display='block';ring.style.transform='translate('+((v.x*0.5+0.5)*w).toFixed(1)+'px,'+((1-(v.y*0.5+0.5))*h).toFixed(1)+'px)';}else ring.style.display='none';}else ring.style.display='none';
+  requestAnimationFrame(frame);
+}
+frame();
+})();
+</script>
+</body>
+</html>

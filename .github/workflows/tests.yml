@@ -1,0 +1,43 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run the tests
+        run: python -m unittest discover -s tests -v
+      - name: Check the app starts and answers
+        shell: bash
+        run: |
+          python starmap.py --no-browser > server.log 2>&1 &
+          for i in $(seq 1 30); do
+            URL=$(grep -o "http://127.0.0.1:[0-9]*/?k=[A-Za-z0-9_-]*" server.log || true)
+            [ -n "$URL" ] && break
+            sleep 1
+          done
+          cat server.log
+          test -n "$URL"
+          python - "$URL" <<'PY'
+          import sys, urllib.request, http.cookiejar
+          jar = http.cookiejar.CookieJar()
+          op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+          op.open(sys.argv[1]).read()
+          base = sys.argv[1].split("/?")[0]
+          info = op.open(base + "/api/info").read()
+          print(info.decode())
+          assert b'"platform"' in info
+          PY

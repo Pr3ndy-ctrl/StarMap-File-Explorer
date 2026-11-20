@@ -94,7 +94,7 @@ The screenshots on this page were made that way.
 python3 -m unittest discover -s tests -v
 ```
 
-The tests build a small sample home folder, scan it, start the server and exercise every request the page makes, including the refusals. They run on macOS, Windows and Linux with Python 3.9 and 3.13 on every push (see `.github/workflows/tests.yml`).
+The tests build a small sample home folder, scan it, start the server and exercise every request the page makes, including the refusals. They run on macOS, Windows and Linux with Python 3.9 and 3.13 on every push, followed by `tests/check_launch.py`, which starts StarMap the way a person would and checks it answers (see `.github/workflows/tests.yml`).
 
 | Path | What it is |
 |---|---|
